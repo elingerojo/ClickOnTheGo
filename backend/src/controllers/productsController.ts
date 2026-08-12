@@ -76,7 +76,9 @@ export async function create(req: Request, res: Response): Promise<void> {
       body.category ?? null,
       JSON.stringify(wixVariants),
       JSON.stringify(jsonLd),
-      JSON.stringify(body.imageUrls ?? []),
+      // image_urls es text[]: pg serializa el arreglo a {} (JSON.stringify
+      // produciría un string inválido → "malformed array literal").
+      body.imageUrls ?? [],
     ],
   );
 
