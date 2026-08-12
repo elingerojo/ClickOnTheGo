@@ -67,9 +67,16 @@ export async function startServer(): Promise<void> {
   });
 
   // Manejo central de errores
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    // Error del parser de body (express.json): JSON inválido/truncado
+    const e = err as { type?: string; message?: string };
+    if (e?.type === 'entity.parse.failed') {
+      console.warn('[server] Body JSON inválido:', { url: req.url, message: e.message });
+      res.status(400).json({ error: 'JSON inválido en el body', code: 'INVALID_JSON' });
+      return;
+    }
     if (err instanceof HttpError) {
-      res.status(err.status).json({ error: err.message });
+      res.status(err.status).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
       return;
     }
     const message = err instanceof Error ? err.message : 'Error interno';

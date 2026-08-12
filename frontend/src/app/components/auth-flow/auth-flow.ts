@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { exchangeOneTimeToken } from '../../services/auth';
 import { setSession, isAuthenticated } from '../../services/session';
+import { ApiError } from '../../services/api';
 
 @Component({
   selector: 'app-auth-flow',
@@ -27,7 +28,22 @@ import { setSession, isAuthenticated } from '../../services/session';
 
       <ng-container *ngIf="status === 'error'">
         <p class="text-red-600 font-semibold mb-2">❌ {{ error }}</p>
-        <p class="text-sm text-slate-500">
+
+        <!-- Caso específico: token ya usado / inválido -->
+        <ng-container *ngIf="errorCode === 'INVALID_OR_USED_TOKEN'">
+          <p class="text-sm text-slate-500 mb-3">
+            Este token de un solo uso <strong>ya fue utilizado o no existe</strong>
+            en la base de datos. Cada token solo sirve para un dispositivo.
+          </p>
+          <p class="text-sm bg-amber-50 text-amber-800 rounded-lg p-3">
+            💡 Genera un token <strong>nuevo</strong> desde la terminal
+            (<code>npm run db:token -w @click-on-the-go/backend</code>) y abre el
+            link nuevo en este dispositivo.
+          </p>
+        </ng-container>
+
+        <!-- Caso genérico -->
+        <p *ngIf="errorCode !== 'INVALID_OR_USED_TOKEN'" class="text-sm text-slate-500">
           Genera un token de un solo uso desde la terminal
           (<code>npm run db:token -w @click-on-the-go/backend</code>) y abre el link
           en este dispositivo.
@@ -51,6 +67,7 @@ import { setSession, isAuthenticated } from '../../services/session';
 export class AuthFlowComponent implements OnInit {
   status: 'exchanging' | 'ok' | 'error' | 'none' = 'none';
   error = '';
+  errorCode = '';
   isAuthenticated = isAuthenticated;
 
   constructor(private readonly router: Router) {}
@@ -67,6 +84,7 @@ export class AuthFlowComponent implements OnInit {
       .catch((err: Error) => {
         this.status = 'error';
         this.error = err.message;
+        this.errorCode = err instanceof ApiError ? (err.code ?? '') : '';
       });
   }
 

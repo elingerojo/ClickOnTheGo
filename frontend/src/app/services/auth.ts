@@ -2,9 +2,13 @@
 import { api } from './api';
 import type { ExchangeResponse } from '@click-on-the-go/shared';
 
-/** Canjea un token de un solo uso por un token de dispositivo. */
+/**
+ * Canjea un token de un solo uso por un token de dispositivo.
+ * El token se envía en el body Y en el query string: si el parser del backend
+ * no recibe el body por cualquier razón de red/proxy, el query es el fallback.
+ */
 export function exchangeOneTimeToken(token: string, deviceName?: string): Promise<ExchangeResponse> {
-  return api<ExchangeResponse>('/api/auth/exchange', {
+  return api<ExchangeResponse>(`/api/auth/exchange?token=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: { token, deviceName },
   });
