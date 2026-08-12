@@ -8,8 +8,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "env": {
-    "BACKEND_PUBLIC_URL": "https://click-on-the-gobackend-production.up.railway.app"
-  }
+  ]
 }
