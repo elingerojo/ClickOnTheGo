@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { exchangeOneTimeToken } from '../../services/auth';
 import { initSession, isAuthenticated, setSession } from '../../services/session';
-import { ApiError } from '../../services/api';
+import { ApiError, storageAvailable } from '../../services/api';
 
 @Component({
   selector: 'app-auth-flow',
@@ -52,6 +52,20 @@ import { ApiError } from '../../services/api';
 
       <ng-container *ngIf="status === 'none'">
         <p class="text-slate-500 mb-4">No se recibió ningún token para canjear.</p>
+
+        <div *ngIf="!storageAvailable()" class="text-sm bg-red-50 text-red-700 rounded-lg p-3 mb-3 text-left">
+          ⚠️ Este navegador tiene el <strong>almacenamiento local bloqueado o estás en modo
+          incógnito/privado</strong>. Sin localStorage no se puede guardar el token de sesión y
+          la sesión se perderá al recargar. Usa un navegador normal y desactiva el modo incógnito.
+        </div>
+
+        <div *ngIf="storageAvailable()" class="text-sm bg-amber-50 text-amber-800 rounded-lg p-3 mb-3 text-left">
+          💡 ¿Ya te habías autenticado antes? La sesión se guarda en <strong>localStorage</strong> y es por
+          <strong>navegador/perfil</strong>. Si entraste con otro navegador, perfil, dispositivo o en modo
+          incógnito, aquí no está tu token. Abre la app en el mismo navegador donde la autenticaste, o genera
+          un token nuevo con <code>npm run db:token -w @click-on-the-go/backend</code>.
+        </div>
+
         <p class="text-sm text-slate-400 mb-6">
           Abre en este dispositivo el <strong>link de invitación</strong> que generaste
           con el script <code>db:token</code>.
@@ -69,6 +83,7 @@ export class AuthFlowComponent implements OnInit {
   error = '';
   errorCode = '';
   isAuthenticated = isAuthenticated;
+  storageAvailable = storageAvailable;
 
   constructor(private readonly router: Router) {}
 
@@ -87,7 +102,7 @@ export class AuthFlowComponent implements OnInit {
     this.status = 'exchanging';
     exchangeOneTimeToken(token, deviceName())
       .then((res) => {
-        setSession(res.deviceToken);
+        setSession(res.deviceToken, res.deviceId);
         // La app arrancó sin token; recargar settings con la sesión nueva.
         initSession();
         // Autenticación exitosa → inicializar directo en Captura.

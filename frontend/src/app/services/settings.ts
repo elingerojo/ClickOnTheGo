@@ -18,8 +18,8 @@ export function runGc(): Promise<GcResult> {
   return api<GcResult>('/api/gc/run', { method: 'POST' });
 }
 
-export function listDevices(): Promise<{ devices: Device[] }> {
-  return api<{ devices: Device[] }>('/api/devices');
+export function listDevices(): Promise<{ devices: Device[]; selfId?: string | null }> {
+  return api<{ devices: Device[]; selfId?: string | null }>('/api/devices');
 }
 
 export function revokeDevice(id: string): Promise<{ ok: boolean }> {

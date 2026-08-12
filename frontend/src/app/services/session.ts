@@ -8,10 +8,12 @@
  * - `settings`: configuración global (categorías, moneda, idioma, SKU, GC).
  */
 import { computed, signal } from '@angular/core';
-import { getDeviceToken, setDeviceToken, api } from './api';
+import { getDeviceToken, setDeviceToken, getDeviceId, setDeviceId, api } from './api';
 import type { AppSettings } from '@click-on-the-go/shared';
 
 export const deviceToken = signal<string | null>(getDeviceToken());
+/** Id del dispositivo actual, usado para no mostrarse a sí mismo en la UI. */
+export const deviceId = signal<string | null>(getDeviceId());
 export const isAuthenticated = computed(() => Boolean(deviceToken()));
 
 /** Se reinicia a `false` en cada arranque de la app. */
@@ -39,14 +41,26 @@ export function initSession(): void {
   }
 }
 
-export function setSession(token: string): void {
+export function setSession(token: string, id?: string): void {
   deviceToken.set(token);
   setDeviceToken(token);
+  if (id) {
+    deviceId.set(id);
+    setDeviceId(id);
+  }
+}
+
+/** Registra el id del dispositivo actual (p.ej. el `selfId` de GET /api/devices). */
+export function setCurrentDeviceId(id: string): void {
+  deviceId.set(id);
+  setDeviceId(id);
 }
 
 export function clearSession(): void {
   deviceToken.set(null);
   setDeviceToken(null);
+  deviceId.set(null);
+  setDeviceId(null);
   autoApproved.set(false);
   settings.set(null);
 }

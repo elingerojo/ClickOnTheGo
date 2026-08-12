@@ -1,7 +1,8 @@
-import { Component, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { listJobs, retryJob, connectSse } from '../../services/jobs';
 import { listDevices, revokeDevice } from '../../services/settings';
+import { deviceId, setCurrentDeviceId } from '../../services/session';
 import type { Device, Job, SseEvent } from '@click-on-the-go/shared';
 
 const STATE_STYLES: Record<string, string> = {
@@ -76,21 +77,19 @@ const STATE_STYLES: Record<string, string> = {
           <h2 class="font-semibold">Dispositivos autenticados</h2>
         </div>
         <div class="divide-y divide-slate-100">
-          <div *ngFor="let d of devices()" class="px-5 py-3 flex items-center justify-between">
+          <div *ngFor="let d of otherDevices()" class="px-5 py-3 flex items-center justify-between">
             <div>
               <p class="font-medium">{{ d.name ?? 'Sin nombre' }}</p>
               <p class="text-xs text-slate-400">
                 Última actividad: {{ d.lastSeenAt ? (d.lastSeenAt | date: 'short') : '—' }}
-                <span *ngIf="d.revokedAt" class="text-red-500 ml-2">(revocado)</span>
               </p>
             </div>
             <button
-              *ngIf="!d.revokedAt"
               (click)="revoke(d)"
               class="px-3 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100"
             >Invalidar</button>
           </div>
-          <div *ngIf="devices().length === 0" class="px-5 py-6 text-center text-slate-400">Sin dispositivos</div>
+          <div *ngIf="otherDevices().length === 0" class="px-5 py-6 text-center text-slate-400">Sin otros dispositivos</div>
         </div>
       </div>
     </div>
@@ -99,6 +98,13 @@ const STATE_STYLES: Record<string, string> = {
 export class JobsDashboardComponent implements OnInit, OnDestroy {
   jobs = signal<Job[]>([]);
   devices = signal<Device[]>([]);
+  /**
+   * Solo los OTROS dispositivos: se oculta el dispositivo actual (no puede
+   * invalidarse a sí mismo) y se descartan los ya invalidados.
+   */
+  otherDevices = computed(() =>
+    this.devices().filter((d) => d.id !== deviceId() && !d.revokedAt),
+  );
   sseConnected = signal(false);
   private es: EventSource | null = null;
 
@@ -115,8 +121,11 @@ export class JobsDashboardComponent implements OnInit, OnDestroy {
     try {
       const { jobs } = await listJobs();
       this.jobs.set(jobs);
-      const { devices } = await listDevices();
+      const { devices, selfId } = await listDevices();
       this.devices.set(devices);
+      // Asegura saber cuál es nuestro propio id (sirve también para sesiones
+      // previas al cambio, donde el deviceId no estaba en localStorage).
+      if (selfId) setCurrentDeviceId(selfId);
     } catch (err) {
       console.error('Error cargando dashboard', err);
     }

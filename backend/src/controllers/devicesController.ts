@@ -17,11 +17,13 @@ function rowToDevice(row: any): Device {
   };
 }
 
-export async function list(_req: Request, res: Response): Promise<void> {
+export async function list(req: Request, res: Response): Promise<void> {
   const { rows } = await query(
     'SELECT id, name, last_seen_at, revoked_at, created_at FROM devices ORDER BY created_at ASC',
   );
-  res.json({ devices: rows.map(rowToDevice) });
+  // `selfId` permite al frontend ocultar el dispositivo actual y así evitar
+  // que se invalide a sí mismo (el token va hasheado, no se puede derivar el id).
+  res.json({ devices: rows.map(rowToDevice), selfId: req.device?.id ?? null });
 }
 
 export async function revoke(req: Request, res: Response): Promise<void> {
