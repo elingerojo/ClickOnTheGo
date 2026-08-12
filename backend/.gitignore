@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+npm-debug.log
+.DS_Store
+Thumbs.db
+.angular/cache
+uploads/
+drizzle/meta/

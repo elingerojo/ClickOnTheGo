@@ -1,0 +1,89 @@
+-- ============================================================
+-- ClickOnTheGo — Esquema Neon (PostgreSQL)
+-- Tablas: products, jobs, devices, one_time_tokens, settings, audit_log
+-- Idempotente: se puede ejecutar varias veces (IF NOT EXISTS).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS products (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    sku            text UNIQUE NOT NULL,
+    name           text NOT NULL,
+    description    text,
+    price          numeric,
+    currency       text NOT NULL DEFAULT 'USD',
+    category       text,
+    -- Forma productOptions / variantsInfo para no romper la estructura de Wix
+    variants       jsonb,
+    -- Marcado schema.org (Product + Offer + inLanguage) para seoData.tags
+    json_ld        jsonb,
+    -- URL definitiva de Wix Media (reemplaza la URL staging de Vercel Blob)
+    image_urls     text[] NOT NULL DEFAULT '{}',
+    status         text NOT NULL DEFAULT 'draft', -- draft | approved | synced | error
+    wix_product_id text,
+    wix_revision   int,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
+CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
+
+-- Cola productor-consumidor
+CREATE TABLE IF NOT EXISTS jobs (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id      uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    state           text NOT NULL DEFAULT 'pending', -- pending | processing | success | error
+    attempts        int NOT NULL DEFAULT 0,
+    max_attempts    int NOT NULL DEFAULT 3,
+    next_attempt_at timestamptz NOT NULL DEFAULT now(),
+    last_error      text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+-- Índice de claim del worker: tomar el pending más antiguo con next_attempt_at <= now()
+CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(state, next_attempt_at);
+
+-- Autenticación multi-dispositivo
+CREATE TABLE IF NOT EXISTS devices (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    token        text UNIQUE NOT NULL,
+    name         text,
+    last_seen_at timestamptz,
+    revoked_at   timestamptz,
+    revoked_by   uuid,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS one_time_tokens (
+    token      text PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    used_at    timestamptz
+);
+
+-- Config central (categorías Wix, moneda, idioma, prefijo SKU, límites GC)
+CREATE TABLE IF NOT EXISTS settings (
+    key        text PRIMARY KEY,
+    value      jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Auditoría de eventos
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         bigserial PRIMARY KEY,
+    event      text NOT NULL,
+    data       jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+
+-- ============================================================
+-- Seed de settings por defecto (categorías de ejemplo, moneda, idioma,
+-- prefijo SKU y límites del script GC). Se pueden sobrescribir desde
+-- el dashboard (Settings) o con PUT /api/settings.
+-- ============================================================
+INSERT INTO settings (key, value) VALUES
+    ('app', '{"categories":["Ropa","Calzado","Accesorios","Electrónica","Hogar","Belleza"],"currency":"USD","language":"es-ES","skuPrefix":"SKU-"}'),
+    ('gc',  '{"blobOkDays":7,"neonOkDays":15,"blobNotOkDays":14,"neonNotOkDays":21,"allDays":21,"skipActiveJobs":true}')
+ON CONFLICT (key) DO NOTHING;

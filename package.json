@@ -1,0 +1,32 @@
+{
+  "name": "click-on-the-go",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Wix Product Capture — foto → IA (Gemini) → Neon → Blob → Wix Catalog V3 (UPSERT por SKU)",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "prepare": "npm run build -w @click-on-the-go/shared",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev -w @click-on-the-go/backend\" \"npm run dev -w @click-on-the-go/frontend\"",
+    "dev:backend": "npm run dev -w @click-on-the-go/backend",
+    "dev:frontend": "npm run dev -w @click-on-the-go/frontend",
+    "build": "npm run build -w @click-on-the-go/shared && npm run build -w @click-on-the-go/backend && npm run build -w @click-on-the-go/frontend",
+    "typecheck": "npm run typecheck -w @click-on-the-go/shared && npm run typecheck -w @click-on-the-go/backend && npm run typecheck -w @click-on-the-go/frontend",
+    "db:schema": "npm run db:schema -w @click-on-the-go/backend"
+  },
+  "engines": {
+    "node": ">=20.6.0",
+    "npm": ">=10"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "optionalDependencies": {
+    "@esbuild/linux-x64": "^0.28.1",
+    "@rolldown/binding-linux-x64-gnu": "^1.2.0",
+    "lightningcss-linux-x64-gnu": "^1.33.0"
+  }
+}

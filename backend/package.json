@@ -1,0 +1,39 @@
+{
+  "name": "@click-on-the-go/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend Express + TypeScript (ESM, NodeNext) + worker polling + SSE. Desplegado en Railway.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:schema": "tsx src/scripts/applySchema.ts",
+    "db:token": "tsx src/scripts/generateOneTimeToken.ts"
+  },
+  "dependencies": {
+    "@click-on-the-go/shared": "*",
+    "@google/genai": "^1.6.0",
+    "@vercel/blob": "^2.8.0",
+    "@wix/sdk": "^1.21.14",
+    "@wix/stores": "^1.0.867",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "pg": "^8.13.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "~6.0.2"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}

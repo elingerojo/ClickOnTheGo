@@ -1,0 +1,34 @@
+/** CRUD de productos/capturas. */
+import { api } from './api';
+import type {
+  AnalyzeResponse,
+  Job,
+  ProductCapture,
+  ProductDraftInput,
+} from '@click-on-the-go/shared';
+
+export interface ListProductsResponse {
+  products: ProductCapture[];
+}
+
+export interface AnalyzeRequestPayload {
+  imageUrls: string[];
+  category?: string;
+}
+
+export function listProducts(status?: string): Promise<ListProductsResponse> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : '';
+  return api<ListProductsResponse>(`/api/products${q}`);
+}
+
+export function createProduct(input: ProductDraftInput): Promise<{ product: ProductCapture }> {
+  return api<{ product: ProductCapture }>('/api/products', { method: 'POST', body: input });
+}
+
+export function approveProduct(id: string): Promise<{ job: Job }> {
+  return api<{ job: Job }>(`/api/products/${id}/approve`, { method: 'POST' });
+}
+
+export function analyzeImages(payload: AnalyzeRequestPayload): Promise<AnalyzeResponse> {
+  return api<AnalyzeResponse>('/api/analyze', { method: 'POST', body: payload });
+}
