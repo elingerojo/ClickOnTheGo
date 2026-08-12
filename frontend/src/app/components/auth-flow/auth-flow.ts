@@ -2,7 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { exchangeOneTimeToken } from '../../services/auth';
-import { setSession, isAuthenticated } from '../../services/session';
+import { initSession, isAuthenticated, setSession } from '../../services/session';
 import { ApiError } from '../../services/api';
 
 @Component({
@@ -74,12 +74,24 @@ export class AuthFlowComponent implements OnInit {
 
   ngOnInit(): void {
     const token = new URLSearchParams(window.location.search).get('token');
+
+    // Ya autenticado: no hace falta re-canjar (el token es de un solo uso).
+    // Ir directo a Captura evita el loader colgado al reabrir un link usado.
+    if (isAuthenticated()) {
+      void this.router.navigate(['/']);
+      return;
+    }
+
     if (!token) return;
+
     this.status = 'exchanging';
     exchangeOneTimeToken(token, deviceName())
       .then((res) => {
         setSession(res.deviceToken);
-        this.status = 'ok';
+        // La app arrancó sin token; recargar settings con la sesión nueva.
+        initSession();
+        // Autenticación exitosa → inicializar directo en Captura.
+        void this.router.navigate(['/']);
       })
       .catch((err: Error) => {
         this.status = 'error';
