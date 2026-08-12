@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "buildCommand": "npm install && npm run build -w @click-on-the-go/frontend",
-  "outputDirectory": "frontend/dist/browser",
+  "outputDirectory": "dist/click-on-the-go/browser",
   "rewrites": [
     {
       "source": "/(.*)",
@@ -10,6 +10,6 @@
     }
   ],
   "env": {
-    "BACKEND_PUBLIC_URL": "https://clickonthego-production.up.railway.app"
+    "BACKEND_PUBLIC_URL": "https://click-on-the-gobackend-production.up.railway.app"
   }
 }
