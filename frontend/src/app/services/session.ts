@@ -34,6 +34,21 @@ export const settings = signal<AppSettings | null>(null);
 export const settingsLoaded = signal(false);
 
 export function initSession(): void {
+  // Re-sincroniza el signal desde localStorage: en la segunda visita (tras
+  // reiniciar el navegador) el snapshot inicial del módulo puede ser null
+  // aunque el token ya esté en localStorage (desfase de restauración de
+  // almacenamiento de Chrome). Se corrige aquí antes de tomar decisiones.
+  const stored = getDeviceToken();
+  if (stored !== deviceToken()) {
+    console.warn('[session] deviceToken re-sincronizado desde localStorage', {
+      prev: deviceToken(),
+      stored,
+    });
+    deviceToken.set(stored);
+  }
+  const storedId = getDeviceId();
+  if (storedId !== deviceId()) deviceId.set(storedId);
+
   // Regla del plan: auto-approved regresa a false al iniciar la app
   autoApproved.set(false);
   if (deviceToken()) {

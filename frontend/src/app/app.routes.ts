@@ -1,16 +1,19 @@
 import { Routes } from '@angular/router';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { isAuthenticated } from './services/session';
 import { getDeviceToken } from './services/api';
 
 export const authGuard = () => {
+  // Lee el token EN VIVO de localStorage: el signal `isAuthenticated()` puede
+  // quedar congelado en null si Chrome aún no restaura el almacenamiento al
+  // evaluarse el módulo (segunda visita tras reiniciar el navegador).
+  const token = getDeviceToken();
   // TEMP-DEBUG (quitar antes del release): decisión del guard + token guardado.
   console.warn('[TEMP-DEBUG] authGuard →', {
-    isAuthenticated: isAuthenticated(),
-    storedToken: getDeviceToken(),
+    isAuthenticated: Boolean(token),
+    storedToken: token,
   });
-  if (isAuthenticated()) return true;
+  if (token) return true;
   return inject(Router).navigate(['/auth']);
 };
 
