@@ -10,18 +10,18 @@ import { startSse, stopSse } from './services/sse';
   imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
   template: `
     <div class="min-h-screen flex flex-col">
-      <header *ngIf="isAuthenticated()" class="bg-brand-700 text-white shadow">
+      <header *ngIf="isAuthenticated()" class="text-sm bg-brand-700 text-white shadow">
         <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <div class="flex items-center gap-1">
-            <a routerLink="/" class="px-3 py-2 rounded font-semibold tracking-tight">
+            <a routerLink="/" class="px-2 py-2 rounded font-semibold tracking-tight">
               📷 ClickOnTheGo
             </a>
             <a routerLink="/" routerLinkActive="bg-brand-600" [routerLinkActiveOptions]="{ exact: true }"
-               class="px-3 py-2 rounded text-sm hover:bg-brand-600">Captura</a>
+               class="px-2 py-2 rounded text-sm hover:bg-brand-600">Captura</a>
             <a routerLink="/dashboard" routerLinkActive="bg-brand-600"
-               class="px-3 py-2 rounded text-sm hover:bg-brand-600">Dashboard</a>
+               class="px-2 py-2 rounded text-sm hover:bg-brand-600">Dashboard</a>
             <a routerLink="/settings" routerLinkActive="bg-brand-600" aria-label="Settings" title="Settings"
-               class="px-3 py-2 rounded text-sm hover:bg-brand-600 inline-flex items-center justify-center">
+               class="px-2 py-2 rounded text-sm hover:bg-brand-600 inline-flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                    stroke="currentColor" class="w-5 h-5" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round"
