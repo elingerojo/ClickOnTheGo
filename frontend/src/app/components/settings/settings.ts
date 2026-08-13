@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, effect, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -8,7 +8,8 @@ import {
   runGc,
   getMyInvitation,
 } from '../../services/settings';
-import { settings } from '../../services/session';
+import { deviceId, settings } from '../../services/session';
+import { invitationUsed } from '../../services/sse';
 import type { AppSettings, GcResult, InvitationResponse } from '@click-on-the-go/shared';
 import QRCode from 'qrcode';
 
@@ -124,6 +125,10 @@ import QRCode from 'qrcode';
           </div>
         </div>
 
+        <p *ngIf="invitationNotice()" class="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">
+          {{ invitationNotice() }}
+        </p>
+
         <div class="flex items-center gap-3 flex-wrap">
           <button (click)="loadInvitation(true)" [disabled]="invitationLoading()"
                   class="px-4 py-2.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
@@ -175,6 +180,27 @@ export class SettingsComponent implements OnInit {
   invitationLink = signal<string | null>(null);
   invitationLoading = signal(false);
   invitationError = signal('');
+  /** Aviso UX cuando otro dispositivo usa la invitación y se regenera. */
+  invitationNotice = signal('');
+
+  constructor() {
+    // Reacción a `invitation:used`: si OTRO dispositivo canjeó nuestra invitación
+    // actual, se genera una nueva automáticamente. El match por token evita
+    // regeneraciones espurias (replay del buffer SSE al reconectar).
+    effect(() => {
+      const evt = invitationUsed();
+      if (!evt) return;
+      if (evt.ownerDeviceId !== deviceId()) return;
+      if (evt.token !== this.invitation()?.token) return;
+      const usedBy = evt.newDeviceName?.trim()
+        ? `"${evt.newDeviceName.trim()}"`
+        : 'otro dispositivo';
+      this.invitationNotice.set(
+        `La invitación fue usada por ${usedBy}. Generando una nueva…`,
+      );
+      void this.loadInvitation(true);
+    });
+  }
 
   ngOnInit(): void {
     void this.load();

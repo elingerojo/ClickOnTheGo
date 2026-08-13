@@ -1,7 +1,8 @@
-import { Component, ElementRef, HostListener, OnInit, signal, ViewChild } from '@angular/core';
+import { Component, ElementRef, HostListener, OnInit, effect, signal, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { initSession, isAuthenticated, clearSession } from './services/session';
+import { startSse, stopSse } from './services/sse';
 
 @Component({
   selector: 'app-root',
@@ -71,6 +72,19 @@ export class AppComponent implements OnInit {
   accountMenuOpen = signal(false);
 
   @ViewChild('accountMenu', { static: false }) accountMenuRef?: ElementRef<HTMLElement>;
+
+  constructor() {
+    // Conexión SSE única a nivel app-root: se abre al autenticar y se cierra al
+    // cerrar sesión. Al vivir aquí (componente siempre montado) sobrevive a los
+    // cambios de ruta, a diferencia de si viviera en un componente de ruta.
+    effect(() => {
+      if (isAuthenticated()) {
+        startSse();
+      } else {
+        stopSse();
+      }
+    });
+  }
 
   ngOnInit(): void {
     initSession();

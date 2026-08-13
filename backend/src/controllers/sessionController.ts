@@ -11,6 +11,7 @@ import { env } from '../config/env.js';
 import { hashToken } from '../middleware/auth.js';
 import { HttpError } from '../utils/httpError.js';
 import { audit } from '../services/auditService.js';
+import { sseBus } from '../config/sse.js';
 
 export async function generateOneTimeToken(_req: Request, res: Response): Promise<void> {
   const token = randomBytes(32).toString('hex');
@@ -81,7 +82,7 @@ export async function exchange(req: Request, res: Response): Promise<void> {
         'INVITATION_EXPIRED',
       );
     }
-    const deviceId = await withTransaction(async (client) => {
+    const { deviceId, ownerDeviceId } = await withTransaction(async (client) => {
       // Marca el token de un solo uso en la MISMA transacción (evita doble canje)
       const used = await client.query(
         `UPDATE one_time_tokens SET used_at = now()
@@ -96,6 +97,13 @@ export async function exchange(req: Request, res: Response): Promise<void> {
           'INVALID_OR_USED_TOKEN',
         );
       }
+      // Identifica qué dispositivo generó la invitación (dueño del QR) ANTES de
+      // anular su invitación activa. Puede no existir (p. ej. token de script).
+      const owner = await client.query(
+        'SELECT id FROM devices WHERE last_unused_one_time_token = $1',
+        [token],
+      );
+      const ownerDeviceId = (owner.rows[0]?.id as string | undefined) ?? null;
       const inserted = await client.query(
         `INSERT INTO devices (token, name)
          VALUES ($1, $2)
@@ -107,9 +115,22 @@ export async function exchange(req: Request, res: Response): Promise<void> {
         'UPDATE devices SET last_unused_one_time_token = NULL WHERE last_unused_one_time_token = $1',
         [token],
       );
-      return inserted.rows[0].id as string;
+      return { deviceId: inserted.rows[0].id as string, ownerDeviceId };
     });
     await audit('auth:device-added', { deviceId });
+    // Notifica por SSE al dispositivo dueño para que regenere su invitación:
+    // el frontend filtra por ownerDeviceId + token para no regenerar en falso.
+    if (ownerDeviceId) {
+      sseBus.emit({
+        type: 'invitation:used',
+        data: {
+          token,
+          ownerDeviceId,
+          newDeviceId: deviceId,
+          newDeviceName: deviceName,
+        },
+      });
+    }
     res.status(201).json({ deviceToken, deviceId });
   } catch (err) {
     if (err instanceof HttpError && err.code === 'INVALID_OR_USED_TOKEN') {

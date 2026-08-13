@@ -315,7 +315,20 @@ export interface GcResult {
   }>;
 }
 
+/** Payload del evento SSE cuando un dispositivo canjea (usa) una invitación QR. */
+export interface InvitationUsedEvent {
+  /** Token de un solo uso que acaba de usarse. */
+  token: string;
+  /** Id del dispositivo que generó la invitación (dueño del QR). */
+  ownerDeviceId: string;
+  /** Id del dispositivo recién autenticado. */
+  newDeviceId: string;
+  /** Nombre del nuevo dispositivo, si lo proporcionó. */
+  newDeviceName?: string;
+}
+
 export type SseEvent =
   | { type: 'job:state'; data: Job }
   | { type: 'product:updated'; data: ProductCapture }
-  | { type: 'gc:done'; data: GcResult };
+  | { type: 'gc:done'; data: GcResult }
+  | { type: 'invitation:used'; data: InvitationUsedEvent };

@@ -1,9 +1,10 @@
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { listJobs, retryJob, connectSse } from '../../services/jobs';
+import { listJobs, retryJob } from '../../services/jobs';
 import { listDevices, revokeDevice } from '../../services/settings';
 import { deviceId, setCurrentDeviceId } from '../../services/session';
-import type { Device, Job, SseEvent } from '@click-on-the-go/shared';
+import { latestJob, sseConnected } from '../../services/sse';
+import type { Device, Job } from '@click-on-the-go/shared';
 
 const STATE_STYLES: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800',
@@ -95,7 +96,7 @@ const STATE_STYLES: Record<string, string> = {
     </div>
   `,
 })
-export class JobsDashboardComponent implements OnInit, OnDestroy {
+export class JobsDashboardComponent implements OnInit {
   jobs = signal<Job[]>([]);
   devices = signal<Device[]>([]);
   /**
@@ -105,16 +106,27 @@ export class JobsDashboardComponent implements OnInit, OnDestroy {
   otherDevices = computed(() =>
     this.devices().filter((d) => d.id !== deviceId() && !d.revokedAt),
   );
-  sseConnected = signal(false);
-  private es: EventSource | null = null;
+  /** Estado de la conexión SSE (store compartido a nivel app-root). */
+  sseConnected = sseConnected;
+
+  constructor() {
+    // Actualizaciones en vivo de jobs vía SSE: hace upsert del último job
+    // notificado sobre la lista local. La conexión la gestiona AppComponent.
+    effect(() => {
+      const job = latestJob();
+      if (!job) return;
+      this.jobs.update((jobs) => {
+        const idx = jobs.findIndex((j) => j.id === job.id);
+        if (idx === -1) return [job, ...jobs];
+        const copy = [...jobs];
+        copy[idx] = job;
+        return copy;
+      });
+    });
+  }
 
   ngOnInit(): void {
     void this.refresh();
-    this.connect();
-  }
-
-  ngOnDestroy(): void {
-    this.es?.close();
   }
 
   async refresh(): Promise<void> {
@@ -128,26 +140,6 @@ export class JobsDashboardComponent implements OnInit, OnDestroy {
       if (selfId) setCurrentDeviceId(selfId);
     } catch (err) {
       console.error('Error cargando dashboard', err);
-    }
-  }
-
-  connect(): void {
-    this.es = connectSse((event: SseEvent) => this.onEvent(event));
-    this.es.onopen = () => this.sseConnected.set(true);
-    this.es.onerror = () => this.sseConnected.set(false);
-  }
-
-  onEvent(event: SseEvent): void {
-    if (event.type === 'job:state') {
-      this.jobs.update((jobs) => {
-        const idx = jobs.findIndex((j) => j.id === event.data.id);
-        if (idx === -1) return [event.data, ...jobs];
-        const copy = [...jobs];
-        copy[idx] = event.data;
-        return copy;
-      });
-    } else if (event.type === 'gc:done') {
-      // no hace falta accion aquí
     }
   }
 
