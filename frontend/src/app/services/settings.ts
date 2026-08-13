@@ -1,6 +1,12 @@
-/** Settings globales + dispositivos + GC. */
+/** Settings globales + dispositivos + invitación + GC. */
 import { api } from './api';
-import type { AppSettings, Device, GcResult, SettingsUpdate } from '@click-on-the-go/shared';
+import type {
+  AppSettings,
+  Device,
+  GcResult,
+  InvitationResponse,
+  SettingsUpdate,
+} from '@click-on-the-go/shared';
 
 export function getSettings(): Promise<AppSettings> {
   return api<AppSettings>('/api/settings');
@@ -20,6 +26,16 @@ export function runGc(): Promise<GcResult> {
 
 export function listDevices(): Promise<{ devices: Device[]; selfId?: string | null }> {
   return api<{ devices: Device[]; selfId?: string | null }>('/api/devices');
+}
+
+/**
+ * Devuelve la invitación activa del dispositivo actual (genera una si hace falta).
+ * Con `regenerate=true` invalida la anterior y crea una nueva.
+ */
+export function getMyInvitation(regenerate = false): Promise<InvitationResponse> {
+  return api<InvitationResponse>(
+    `/api/devices/me/invitation${regenerate ? '?regenerate=1' : ''}`,
+  );
 }
 
 export function revokeDevice(id: string): Promise<{ ok: boolean }> {

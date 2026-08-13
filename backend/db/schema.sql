@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS devices (
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+-- Invitación activa (un solo uso) de cada dispositivo: cada device tiene como
+-- máximo UNA invitación sin usar; se genera lazy al mostrar el QR en Settings.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_unused_one_time_token text;
+CREATE INDEX IF NOT EXISTS idx_devices_last_unused_token
+  ON devices(last_unused_one_time_token) WHERE last_unused_one_time_token IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS one_time_tokens (
     token      text PRIMARY KEY,
     created_at timestamptz NOT NULL DEFAULT now(),

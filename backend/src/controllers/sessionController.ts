@@ -51,7 +51,36 @@ export async function exchange(req: Request, res: Response): Promise<void> {
   const rawDeviceName = (req.body as { deviceName?: unknown } | undefined)?.deviceName;
   const deviceName = typeof rawDeviceName === 'string' ? rawDeviceName : undefined;
   const deviceToken = randomBytes(32).toString('hex');
+  const ttlMs = env.invitationTtlDays * 86_400_000;
   try {
+    // Caducidad dura: la invitación solo es válida N días desde su creación.
+    const existing = await query(
+      'SELECT created_at, used_at FROM one_time_tokens WHERE token = $1',
+      [token],
+    );
+    if (existing.rows.length === 0 || existing.rows[0].used_at) {
+      throw new HttpError(
+        400,
+        'Token de un solo uso inválido o ya utilizado. Genera uno nuevo.',
+        'INVALID_OR_USED_TOKEN',
+      );
+    }
+    if (Date.now() - new Date(existing.rows[0].created_at as Date).getTime() > ttlMs) {
+      // Invitación vencida: se limpia (marcar usada + anular columna del dueño).
+      await query(
+        'UPDATE one_time_tokens SET used_at = now() WHERE token = $1 AND used_at IS NULL',
+        [token],
+      );
+      await query(
+        'UPDATE devices SET last_unused_one_time_token = NULL WHERE last_unused_one_time_token = $1',
+        [token],
+      );
+      throw new HttpError(
+        410,
+        'Invitación expirada. Genera una nueva desde Settings.',
+        'INVITATION_EXPIRED',
+      );
+    }
     const deviceId = await withTransaction(async (client) => {
       // Marca el token de un solo uso en la MISMA transacción (evita doble canje)
       const used = await client.query(
@@ -73,6 +102,11 @@ export async function exchange(req: Request, res: Response): Promise<void> {
          RETURNING id`,
         [hashToken(deviceToken), deviceName ?? 'Dispositivo nuevo'],
       );
+      // La invitación consumida deja de ser la activa del device dueño.
+      await client.query(
+        'UPDATE devices SET last_unused_one_time_token = NULL WHERE last_unused_one_time_token = $1',
+        [token],
+      );
       return inserted.rows[0].id as string;
     });
     await audit('auth:device-added', { deviceId });
@@ -83,6 +117,11 @@ export async function exchange(req: Request, res: Response): Promise<void> {
         '[auth] exchange: token rechazado (inválido o ya usado)',
         { tokenPreview: `${token.slice(0, 6)}…${token.slice(-4)}` },
       );
+    }
+    if (err instanceof HttpError && err.code === 'INVITATION_EXPIRED') {
+      console.warn('[auth] exchange: invitación expirada', {
+        tokenPreview: `${token.slice(0, 6)}…${token.slice(-4)}`,
+      });
     }
     throw err;
   }

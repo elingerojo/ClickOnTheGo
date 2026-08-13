@@ -6,9 +6,11 @@ import {
   putSettings,
   refreshSettings,
   runGc,
+  getMyInvitation,
 } from '../../services/settings';
 import { settings } from '../../services/session';
-import type { AppSettings, GcResult } from '@click-on-the-go/shared';
+import type { AppSettings, GcResult, InvitationResponse } from '@click-on-the-go/shared';
+import QRCode from 'qrcode';
 
 @Component({
   selector: 'app-settings',
@@ -89,6 +91,48 @@ import type { AppSettings, GcResult } from '@click-on-the-go/shared';
         <p *ngIf="error()" class="text-sm text-red-600 bg-red-50 rounded-lg p-3">{{ error() }}</p>
       </form>
 
+      <!-- Invitación QR -->
+      <div class="bg-white rounded-2xl shadow p-6 space-y-3">
+        <h2 class="font-semibold">Invitación (QR)</h2>
+        <p class="text-sm text-slate-500">
+          Muestra este QR para vincular otro dispositivo. La invitación es de un solo uso y
+          caduca a los 7 días.
+        </p>
+
+        <div class="flex flex-col sm:flex-row items-center gap-6">
+          <div class="flex flex-col items-center gap-2">
+            <img *ngIf="invitationQr()" [src]="invitationQr()" alt="QR de invitación"
+                 class="w-56 h-56 rounded-lg border border-slate-200" />
+            <div *ngIf="invitationLoading() && !invitationQr()"
+                 class="w-56 h-56 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-slate-400 text-sm">
+              Generando…
+            </div>
+            <div *ngIf="invitation() as inv" class="flex items-center gap-2 text-2xl font-bold capitalize">
+              <span aria-hidden="true">{{ inv.emoji }}</span><span>{{ inv.word }}</span>
+            </div>
+          </div>
+
+          <div class="text-sm text-slate-600 space-y-2 max-w-sm">
+            <p>1. Muestra el QR a la persona que va a autenticar su dispositivo.</p>
+            <p>2. Confirma por teléfono/chat la <strong>palabra y el icono</strong> para asegurar
+              que ambos ven la misma invitación.</p>
+            <p>3. Es de <strong>un solo uso</strong> y <strong>caduca a los 7 días</strong>.</p>
+            <p>4. Si presionas <strong>Regenerar</strong>, la invitación anterior deja de servir
+              y se crea una nueva.</p>
+            <a *ngIf="invitation()?.link" [href]="invitation()?.link" target="_blank" rel="noopener"
+               class="inline-block text-brand-600 underline break-all text-xs">{{ invitation()?.link }}</a>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 flex-wrap">
+          <button (click)="loadInvitation(true)" [disabled]="invitationLoading()"
+                  class="px-4 py-2.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
+            {{ invitationLoading() ? 'Generando…' : 'Regenerar invitación' }}
+          </button>
+          <p *ngIf="invitationError()" class="text-sm text-red-600">{{ invitationError() }}</p>
+        </div>
+      </div>
+
       <!-- GC -->
       <div class="bg-white rounded-2xl shadow p-6 space-y-3">
         <h2 class="font-semibold">Limpieza (GC) — bajo demanda</h2>
@@ -126,8 +170,31 @@ export class SettingsComponent implements OnInit {
   gcRunning = signal(false);
   gcResult = signal<GcResult | null>(null);
 
+  invitation = signal<InvitationResponse | null>(null);
+  invitationQr = signal<string | null>(null);
+  invitationLoading = signal(false);
+  invitationError = signal('');
+
   ngOnInit(): void {
     void this.load();
+    void this.loadInvitation();
+  }
+
+  /** Obtiene la invitación activa y renderiza el QR con el emoji superpuesto. */
+  async loadInvitation(regenerate = false): Promise<void> {
+    this.invitationLoading.set(true);
+    this.invitationError.set('');
+    try {
+      const inv = await getMyInvitation(regenerate);
+      this.invitation.set(inv);
+      this.invitationQr.set(await makeInvitationQrDataUrl(inv.link, inv.emoji));
+    } catch (err) {
+      this.invitationError.set(
+        err instanceof Error ? err.message : 'Error al generar la invitación',
+      );
+    } finally {
+      this.invitationLoading.set(false);
+    }
   }
 
   async load(): Promise<void> {
@@ -193,4 +260,27 @@ export class SettingsComponent implements OnInit {
       this.gcRunning.set(false);
     }
   }
+}
+
+/**
+ * Renderiza el QR como data URL con el emoji superpuesto en el centro.
+ * Se usa `errorCorrectionLevel: 'H'` para que el overlay no rompa el escaneo.
+ */
+async function makeInvitationQrDataUrl(link: string, emoji: string): Promise<string> {
+  const canvas = document.createElement('canvas');
+  await QRCode.toCanvas(canvas, link, { width: 240, margin: 1, errorCorrectionLevel: 'H' });
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const size = canvas.width;
+    const overlay = Math.round(size * 0.18);
+    const x = (size - overlay) / 2;
+    const y = (size - overlay) / 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x - 2, y - 2, overlay + 4, overlay + 4);
+    ctx.font = `${overlay}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, size / 2, size / 2 + 2);
+  }
+  return canvas.toDataURL('image/png');
 }

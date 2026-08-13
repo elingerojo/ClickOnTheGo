@@ -55,6 +55,11 @@ export const env = {
     return process.env.APP_BASE_URL ?? 'http://localhost:4200';
   },
 
+  /** Días de validez de una invitación QR (caducidad dura en el exchange). Default: 7. */
+  get invitationTtlDays(): number {
+    return numberFromEnv(process.env.INVITATION_TTL_DAYS, 7);
+  },
+
   get backendPublicUrl(): string {
     return process.env.BACKEND_PUBLIC_URL ?? `http://localhost:${this.port}`;
   },

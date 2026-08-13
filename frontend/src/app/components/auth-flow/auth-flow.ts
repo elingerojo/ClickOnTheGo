@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { exchangeOneTimeToken, validateDeviceToken } from '../../services/auth';
@@ -10,6 +10,7 @@ import {
   clearSession,
 } from '../../services/session';
 import { ApiError, storageAvailable } from '../../services/api';
+import { invitationIdentity } from '@click-on-the-go/shared';
 
 @Component({
   selector: 'app-auth-flow',
@@ -19,6 +20,15 @@ import { ApiError, storageAvailable } from '../../services/api';
     <div class="max-w-md mx-auto mt-16 bg-white rounded-2xl shadow p-8 text-center">
       <div class="text-5xl mb-4">🔐</div>
       <h1 class="text-xl font-bold mb-2">Autenticación de dispositivo</h1>
+
+      <div *ngIf="identity() as id" class="text-sm bg-brand-50 text-brand-800 rounded-lg p-3 mb-4">
+        Esta invitación es:
+        <div class="flex items-center justify-center gap-2 mt-1 text-2xl font-bold capitalize">
+          <span aria-hidden="true">{{ id.emoji }}</span><span>{{ id.word }}</span>
+        </div>
+        <p class="text-xs text-brand-700 mt-1">Confirma con el anfitrión la palabra y el icono para
+          asegurar que la invitación sigue siendo la misma.</p>
+      </div>
 
       <ng-container *ngIf="status === 'validating'">
         <p class="text-slate-500">Verificando sesión guardada…</p>
@@ -95,11 +105,14 @@ export class AuthFlowComponent implements OnInit {
   errorCode = '';
   isAuthenticated = isAuthenticated;
   storageAvailable = storageAvailable;
+  /** Identidad humana (palabra + emoji) de la invitación del URL, para compararla con el anfitrión. */
+  identity = signal<{ word: string; emoji: string } | null>(null);
 
   constructor(private readonly router: Router) {}
 
   ngOnInit(): void {
     const token = new URLSearchParams(window.location.search).get('token');
+    if (token) this.identity.set(invitationIdentity(token));
 
     // TEMP-DEBUG (quitar antes del release): estado al entrar en la página de auth.
     console.warn('[TEMP-DEBUG] auth-flow ngOnInit →', {

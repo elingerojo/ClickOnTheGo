@@ -1,7 +1,7 @@
 /**
  * @click-on-the-go/shared
  * Contratos de datos compartidos entre frontend (Angular) y backend (Express).
- * Solo tipos TypeScript — no contiene lógica en runtime.
+ * Tipos + helpers de runtime sin dependencias (p. ej. `invitationIdentity`).
  */
 
 /* ---------------------------------------------------------------------------
@@ -176,6 +176,59 @@ export interface ValidateTokenResponse {
 
 export interface CreateDeviceInput {
   name?: string;
+}
+
+/** Identidad humana de una invitación (1 palabra + 1 emoji, diccionario de 20). */
+export interface InvitationIdentity {
+  word: string;
+  emoji: string;
+}
+
+/** Respuesta de GET /api/devices/me/invitation: la invitación activa del device. */
+export interface InvitationResponse {
+  /** Link `APP_BASE_URL/auth?token=...` que codifica el QR. */
+  link: string;
+  token: string;
+  word: string;
+  emoji: string;
+}
+
+/** Diccionario de 20 entradas (palabra → emoji) para el identificador humano. */
+const INVITATION_DICTIONARY: ReadonlyArray<{ word: string; emoji: string }> = [
+  { word: 'tigre', emoji: '🐯' },
+  { word: 'luna', emoji: '🌙' },
+  { word: 'sopa', emoji: '🍲' },
+  { word: 'lluvia', emoji: '🌧️' },
+  { word: 'león', emoji: '🦁' },
+  { word: 'pan', emoji: '🍞' },
+  { word: 'sol', emoji: '☀️' },
+  { word: 'gato', emoji: '🐱' },
+  { word: 'estrella', emoji: '⭐' },
+  { word: 'casa', emoji: '🏠' },
+  { word: 'mar', emoji: '🌊' },
+  { word: 'árbol', emoji: '🌳' },
+  { word: 'nube', emoji: '☁️' },
+  { word: 'pájaro', emoji: '🐦' },
+  { word: 'rana', emoji: '🐸' },
+  { word: 'manzana', emoji: '🍎' },
+  { word: 'rayo', emoji: '⚡' },
+  { word: 'flor', emoji: '🌸' },
+  { word: 'perro', emoji: '🐶' },
+  { word: 'montaña', emoji: '⛰️' },
+];
+
+/**
+ * Deriva de forma determinista la identidad (1 palabra + 1 emoji) de un token de
+ * invitación usando un hash FNV-1a de 32 bits. Es un fingerprint VISUAL: no revela
+ * el token; sirve para que dos humanos comparen "la misma invitación" por teléfono.
+ */
+export function invitationIdentity(token: string): InvitationIdentity {
+  let hash = 2166136261;
+  for (let i = 0; i < token.length; i++) {
+    hash ^= token.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return INVITATION_DICTIONARY[Math.abs(hash) % INVITATION_DICTIONARY.length];
 }
 
 /* ---------------------------------------------------------------------------

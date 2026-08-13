@@ -60,6 +60,12 @@ export async function startServer(): Promise<void> {
   app.post('/api/settings/refresh', requireDevice, asyncHandler(settingsController.refresh));
   app.post('/api/gc/run', requireDevice, asyncHandler(runGc));
   app.get('/api/devices', requireDevice, asyncHandler(devicesController.list));
+  // Ruta fija antes de :id para que "me" no se interprete como un id.
+  app.get(
+    '/api/devices/me/invitation',
+    requireDevice,
+    asyncHandler(devicesController.getMyInvitation),
+  );
   app.post('/api/devices/:id/revoke', requireDevice, asyncHandler(devicesController.revoke));
 
   // 404
