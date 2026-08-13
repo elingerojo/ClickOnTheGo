@@ -112,10 +112,7 @@ export async function getMyInvitation(req: Request, res: Response): Promise<void
 
 function buildInvitation(token: string): InvitationResponse {
   const { word, emoji } = invitationIdentity(token);
-  return {
-    link: `${env.appBaseUrl}/auth?token=${token}`,
-    token,
-    word,
-    emoji,
-  };
+  // El link del QR lo construye el FRONTEND con `window.location.origin`
+  // (apunta al frontend real: Vercel en prod, localhost en dev).
+  return { token, word, emoji };
 }

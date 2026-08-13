@@ -186,8 +186,6 @@ export interface InvitationIdentity {
 
 /** Respuesta de GET /api/devices/me/invitation: la invitación activa del device. */
 export interface InvitationResponse {
-  /** Link `APP_BASE_URL/auth?token=...` que codifica el QR. */
-  link: string;
   token: string;
   word: string;
   emoji: string;

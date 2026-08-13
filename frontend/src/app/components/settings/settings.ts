@@ -119,8 +119,8 @@ import QRCode from 'qrcode';
             <p>3. Es de <strong>un solo uso</strong> y <strong>caduca a los 7 días</strong>.</p>
             <p>4. Si presionas <strong>Regenerar</strong>, la invitación anterior deja de servir
               y se crea una nueva.</p>
-            <a *ngIf="invitation()?.link" [href]="invitation()?.link" target="_blank" rel="noopener"
-               class="inline-block text-brand-600 underline break-all text-xs">{{ invitation()?.link }}</a>
+            <a *ngIf="invitationLink()" [href]="invitationLink()" target="_blank" rel="noopener"
+               class="inline-block text-brand-600 underline break-all text-xs">{{ invitationLink() }}</a>
           </div>
         </div>
 
@@ -172,6 +172,7 @@ export class SettingsComponent implements OnInit {
 
   invitation = signal<InvitationResponse | null>(null);
   invitationQr = signal<string | null>(null);
+  invitationLink = signal<string | null>(null);
   invitationLoading = signal(false);
   invitationError = signal('');
 
@@ -187,7 +188,11 @@ export class SettingsComponent implements OnInit {
     try {
       const inv = await getMyInvitation(regenerate);
       this.invitation.set(inv);
-      this.invitationQr.set(await makeInvitationQrDataUrl(inv.link, inv.emoji));
+      // El QR apunta al origen REAL del frontend (Vercel en prod, localhost en dev),
+      // no al `APP_BASE_URL` del backend (que puede quedar en localhost).
+      const link = `${window.location.origin}/auth?token=${inv.token}`;
+      this.invitationLink.set(link);
+      this.invitationQr.set(await makeInvitationQrDataUrl(link, inv.emoji));
     } catch (err) {
       this.invitationError.set(
         err instanceof Error ? err.message : 'Error al generar la invitación',
