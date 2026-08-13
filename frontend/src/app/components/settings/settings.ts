@@ -282,7 +282,9 @@ async function makeInvitationQrDataUrl(link: string, emoji: string): Promise<str
     const y = (size - overlay) / 2;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(x - 2, y - 2, overlay + 4, overlay + 4);
-    ctx.font = `${overlay}px serif`;
+    // 4px menores (2px por lado) para dejar espacio visual alrededor del emoji,
+    // manteniendo la caja blanca del tamaño original.
+    ctx.font = `${overlay - 4}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(emoji, size / 2, size / 2 + 2);
