@@ -8,7 +8,7 @@ import {
   runGc,
   getMyInvitation,
 } from '../../services/settings';
-import { deviceId, settings } from '../../services/session';
+import { settings } from '../../services/session';
 import { invitationUsed } from '../../services/sse';
 import type { AppSettings, GcResult, InvitationResponse } from '@click-on-the-go/shared';
 import QRCode from 'qrcode';
@@ -125,10 +125,6 @@ import QRCode from 'qrcode';
           </div>
         </div>
 
-        <p *ngIf="invitationNotice()" class="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">
-          {{ invitationNotice() }}
-        </p>
-
         <div class="flex items-center gap-3 flex-wrap">
           <button (click)="loadInvitation(true)" [disabled]="invitationLoading()"
                   class="px-4 py-2.5 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
@@ -180,24 +176,16 @@ export class SettingsComponent implements OnInit {
   invitationLink = signal<string | null>(null);
   invitationLoading = signal(false);
   invitationError = signal('');
-  /** Aviso UX cuando otro dispositivo usa la invitación y se regenera. */
-  invitationNotice = signal('');
-
   constructor() {
-    // Reacción a `invitation:used`: si OTRO dispositivo canjeó nuestra invitación
-    // actual, se genera una nueva automáticamente. El match por token evita
-    // regeneraciones espurias (replay del buffer SSE al reconectar).
+    // Reacción a `invitation:used`: el backend difunde el token que acaba de
+    // usarse. Solo si coincide con el token que mostramos en nuestro QR, se
+    // regenera la invitación (decisión local, sin `deviceId`). El match por token
+    // es inmune al replay del buffer SSE: tras regenerar, el token cambia y el
+    // evento reenviado deja de coincidir.
     effect(() => {
       const evt = invitationUsed();
       if (!evt) return;
-      if (evt.ownerDeviceId !== deviceId()) return;
       if (evt.token !== this.invitation()?.token) return;
-      const usedBy = evt.newDeviceName?.trim()
-        ? `"${evt.newDeviceName.trim()}"`
-        : 'otro dispositivo';
-      this.invitationNotice.set(
-        `La invitación fue usada por ${usedBy}. Generando una nueva…`,
-      );
       void this.loadInvitation(true);
     });
   }
@@ -213,6 +201,13 @@ export class SettingsComponent implements OnInit {
     this.invitationError.set('');
     try {
       const inv = await getMyInvitation(regenerate);
+      // Hardening de race: si la invitación recién cargada coincide con el último
+      // token difundido como usado, es que ya fue canjeada (el evento SSE llegó
+      // antes de cargar el QR) → se regenera una vez para no estacionar un token
+      // muerto. `return await` mantiene `invitationLoading` activo hasta terminar.
+      if (!regenerate && inv.token === invitationUsed()?.token) {
+        return await this.loadInvitation(true);
+      }
       this.invitation.set(inv);
       // El QR apunta al origen REAL del frontend (Vercel en prod, localhost en dev),
       // no al `APP_BASE_URL` del backend (que puede quedar en localhost).

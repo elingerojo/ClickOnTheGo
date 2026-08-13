@@ -62,6 +62,13 @@ function connectSse(onEvent: (event: SseEvent) => void): EventSource {
 /** Abre la conexión SSE única (idempotente) y distribuye eventos a los signals. */
 export function startSse(): void {
   if (es) return;
+  // Defensivo: sin device token no hay cómo autenticar la suscripción, así que
+  // no se conecta (p. ej. logout a medias o arranque sin sesión).
+  const token = getDeviceToken();
+  if (!token) {
+    console.warn('[sse] sin device token — conexión SSE omitida');
+    return;
+  }
   es = connectSse((event) => {
     switch (event.type) {
       case 'job:state':
@@ -77,9 +84,17 @@ export function startSse(): void {
         invitationUsed.set(event.data);
         break;
     }
+    // Diagnóstico: confirma la cadena SSE (recepción) en la consola del navegador.
+    console.log('[sse] evento recibido', event.type);
   });
-  es.onopen = () => sseConnected.set(true);
-  es.onerror = () => sseConnected.set(false);
+  es.onopen = () => {
+    sseConnected.set(true);
+    console.log('[sse] conectado');
+  };
+  es.onerror = () => {
+    sseConnected.set(false);
+    console.warn('[sse] error/desconexión');
+  };
 }
 
 /** Cierra la conexión SSE (logout). Idempotente. */

@@ -315,16 +315,15 @@ export interface GcResult {
   }>;
 }
 
-/** Payload del evento SSE cuando un dispositivo canjea (usa) una invitación QR. */
+/**
+ * Payload del evento SSE `invitation:used`: el backend difunde el token de un
+ * solo uso que acaba de canjearse. Cada dispositivo conectado compara ese token
+ * con el de su propia invitación estacionada; el que coincide regenera la suya.
+ * No lleva `deviceId` ni identidad del nuevo dispositivo: la decisión es local.
+ */
 export interface InvitationUsedEvent {
-  /** Token de un solo uso que acaba de usarse. */
+  /** Token de un solo uso que acaba de usarse (ya no es válido). */
   token: string;
-  /** Id del dispositivo que generó la invitación (dueño del QR). */
-  ownerDeviceId: string;
-  /** Id del dispositivo recién autenticado. */
-  newDeviceId: string;
-  /** Nombre del nuevo dispositivo, si lo proporcionó. */
-  newDeviceName?: string;
 }
 
 export type SseEvent =
