@@ -1,6 +1,6 @@
 /** Servicios de autenticación multi-dispositivo. */
 import { api } from './api';
-import type { ExchangeResponse } from '@click-on-the-go/shared';
+import type { ExchangeResponse, ValidateTokenResponse } from '@click-on-the-go/shared';
 
 /**
  * Canjea un token de un solo uso por un token de dispositivo.
@@ -12,6 +12,16 @@ export function exchangeOneTimeToken(token: string, deviceName?: string): Promis
     method: 'POST',
     body: { token, deviceName },
   });
+}
+
+/**
+ * Valida la sesión guardada en localStorage contra el backend
+ * (GET /api/auth/validate). El token se envía automáticamente por `api()`
+ * en la cabecera `X-Device-Token`.
+ * @param hadInvitation Si el usuario llegó con un link de invitación en el URL.
+ */
+export function validateDeviceToken(hadInvitation = false): Promise<ValidateTokenResponse> {
+  return api<ValidateTokenResponse>(`/api/auth/validate${hadInvitation ? '?hadInvitation=1' : ''}`);
 }
 
 /** (Uso desde terminal) Genera un token de un solo uso — requiere ADMIN_TOKEN. */

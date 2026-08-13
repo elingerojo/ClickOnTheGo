@@ -87,3 +87,45 @@ export async function exchange(req: Request, res: Response): Promise<void> {
     throw err;
   }
 }
+
+/**
+ * Valida un device token (header `X-Device-Token` o query `?token=`) sin exigir
+ * autorización: devuelve `{ valid, device? }`. El frontend lo usa en `/auth` para
+ * decidir si la sesión guardada en localStorage sigue vigente y, de ser así, ignorar
+ * la invitación del URL. Cada intento se loguea para revisarse en Railway.
+ */
+export async function validateDevice(req: Request, res: Response): Promise<void> {
+  const token =
+    req.header('x-device-token') ??
+    (typeof req.query.token === 'string' ? req.query.token : '');
+  const hadInvitation = req.query.hadInvitation === '1' || req.query.hadInvitation === 'true';
+
+  if (!token) {
+    console.log('[auth] validate: sin token', { hadInvitation, ip: req.ip });
+    res.status(400).json({ valid: false, error: 'Falta X-Device-Token' });
+    return;
+  }
+
+  const { rows } = await query(
+    'SELECT id, name FROM devices WHERE token = $1 AND revoked_at IS NULL',
+    [hashToken(token)],
+  );
+  const valid = rows.length > 0;
+  const device = valid
+    ? { id: rows[0].id as string, name: rows[0].name as string | null }
+    : undefined;
+
+  // Log para Railway: cada validación y cuándo se ignora una invitación ya cubierta.
+  console.log('[auth] validate', {
+    valid,
+    deviceId: device?.id,
+    deviceName: device?.name,
+    tokenPreview: `${token.slice(0, 6)}…${token.slice(-4)}`,
+    hadInvitation,
+    ip: req.ip,
+    ua: req.get('user-agent'),
+    action: valid && hadInvitation ? 'invitation_ignored_already_authenticated' : undefined,
+  });
+
+  res.json({ valid, ...(device ? { device } : {}) });
+}

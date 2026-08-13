@@ -9,8 +9,12 @@ const DEVICE_ID_KEY = 'cog_device_id';
 
 export function getDeviceToken(): string | null {
   try {
-    return localStorage.getItem(DEVICE_TOKEN_KEY);
-  } catch {
+    const token = localStorage.getItem(DEVICE_TOKEN_KEY);
+    // TEMP-DEBUG (quitar antes del release): muestra el token crudo de localStorage.
+    console.warn('[TEMP-DEBUG] getDeviceToken() →', token);
+    return token;
+  } catch (err) {
+    console.warn('[TEMP-DEBUG] getDeviceToken() → localStorage inaccesible', err);
     return null;
   }
 }

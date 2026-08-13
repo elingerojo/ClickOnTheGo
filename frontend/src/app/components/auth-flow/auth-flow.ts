@@ -1,8 +1,14 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { exchangeOneTimeToken } from '../../services/auth';
-import { initSession, isAuthenticated, setSession } from '../../services/session';
+import { exchangeOneTimeToken, validateDeviceToken } from '../../services/auth';
+import {
+  initSession,
+  isAuthenticated,
+  setSession,
+  deviceToken,
+  clearSession,
+} from '../../services/session';
 import { ApiError, storageAvailable } from '../../services/api';
 
 @Component({
@@ -13,6 +19,11 @@ import { ApiError, storageAvailable } from '../../services/api';
     <div class="max-w-md mx-auto mt-16 bg-white rounded-2xl shadow p-8 text-center">
       <div class="text-5xl mb-4">🔐</div>
       <h1 class="text-xl font-bold mb-2">Autenticación de dispositivo</h1>
+
+      <ng-container *ngIf="status === 'validating'">
+        <p class="text-slate-500">Verificando sesión guardada…</p>
+        <div class="mt-4 inline-block h-8 w-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+      </ng-container>
 
       <ng-container *ngIf="status === 'exchanging'">
         <p class="text-slate-500">Canjeando token de un solo uso…</p>
@@ -79,7 +90,7 @@ import { ApiError, storageAvailable } from '../../services/api';
   `,
 })
 export class AuthFlowComponent implements OnInit {
-  status: 'exchanging' | 'ok' | 'error' | 'none' = 'none';
+  status: 'validating' | 'exchanging' | 'ok' | 'error' | 'none' = 'none';
   error = '';
   errorCode = '';
   isAuthenticated = isAuthenticated;
@@ -90,15 +101,54 @@ export class AuthFlowComponent implements OnInit {
   ngOnInit(): void {
     const token = new URLSearchParams(window.location.search).get('token');
 
-    // Ya autenticado: no hace falta re-canjar (el token es de un solo uso).
-    // Ir directo a Captura evita el loader colgado al reabrir un link usado.
-    if (isAuthenticated()) {
-      void this.router.navigate(['/']);
+    // TEMP-DEBUG (quitar antes del release): estado al entrar en la página de auth.
+    console.warn('[TEMP-DEBUG] auth-flow ngOnInit →', {
+      urlToken: token,
+      storedToken: deviceToken(),
+      isAuthenticated: isAuthenticated(),
+    });
+
+    // Paso 1: intentar autentificar con la sesión guardada en localStorage.
+    if (deviceToken()) {
+      this.status = 'validating';
+      validateDeviceToken(Boolean(token))
+        .then((res) => {
+          if (res.valid) {
+            // Ya autenticado: la invitación del URL no tiene sentido, se ignora.
+            console.info('[auth] Sesión localStorage válida; invitación ignorada', {
+              hadInvitation: Boolean(token),
+            });
+            initSession();
+            void this.router.navigate(['/']);
+            return;
+          }
+          // El token guardado ya no es válido → limpiarlo y seguir con la invitación.
+          clearSession();
+          this.proceedWithInvitation(token);
+        })
+        .catch((err: Error) => {
+          // 401 = token inválido → limpiar y usar la invitación.
+          if (err instanceof ApiError && err.status === 401) {
+            clearSession();
+            this.proceedWithInvitation(token);
+            return;
+          }
+          // Error de red/5xx: no destruir la sesión; intentar con la invitación igualmente.
+          console.warn('[auth] No se pudo validar la sesión guardada', err);
+          this.proceedWithInvitation(token);
+        });
       return;
     }
 
-    if (!token) return;
+    // Paso 2: sin sesión guardada → canjear la invitación si existe.
+    this.proceedWithInvitation(token);
+  }
 
+  private proceedWithInvitation(token: string | null): void {
+    if (!token) {
+      this.status = 'none';
+      return;
+    }
     this.status = 'exchanging';
     exchangeOneTimeToken(token, deviceName())
       .then((res) => {

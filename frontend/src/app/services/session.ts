@@ -8,13 +8,21 @@
  * - `settings`: configuración global (categorías, moneda, idioma, SKU, GC).
  */
 import { computed, signal } from '@angular/core';
-import { getDeviceToken, setDeviceToken, getDeviceId, setDeviceId, api } from './api';
+import { getDeviceToken, setDeviceToken, getDeviceId, setDeviceId, api, storageAvailable } from './api';
 import type { AppSettings } from '@click-on-the-go/shared';
 
 export const deviceToken = signal<string | null>(getDeviceToken());
 /** Id del dispositivo actual, usado para no mostrarse a sí mismo en la UI. */
 export const deviceId = signal<string | null>(getDeviceId());
 export const isAuthenticated = computed(() => Boolean(deviceToken()));
+
+// TEMP-DEBUG (quitar antes del release): estado inicial de la sesión al arrancar.
+console.warn('[TEMP-DEBUG] session.ts init →', {
+  deviceToken: deviceToken(),
+  deviceId: deviceId(),
+  isAuthenticated: isAuthenticated(),
+  storageAvailable: storageAvailable(),
+});
 
 /** Se reinicia a `false` en cada arranque de la app. */
 export const autoApproved = signal<boolean>(false);

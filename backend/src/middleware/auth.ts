@@ -40,6 +40,11 @@ export async function requireDevice(
   const token =
     req.header('x-device-token') ??
     (typeof req.query.token === 'string' ? req.query.token : '');
+  // TEMP-DEBUG (quitar antes del release): token que llega al backend (visible en Railway).
+  console.warn('[TEMP-DEBUG] requireDevice →', {
+    token,
+    url: req.originalUrl,
+  });
   if (!token) {
     res.status(401).json({ error: 'Falta X-Device-Token' });
     return;

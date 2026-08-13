@@ -42,6 +42,7 @@ export async function startServer(): Promise<void> {
     asyncHandler(sessionController.generateOneTimeToken),
   );
   app.post('/api/auth/exchange', asyncHandler(sessionController.exchange));
+  app.get('/api/auth/validate', asyncHandler(sessionController.validateDevice));
 
   /* ------------------- SSE (device token por query) ------------ */
   app.get('/api/events', requireDevice, stream);

@@ -2,8 +2,14 @@ import { Routes } from '@angular/router';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { isAuthenticated } from './services/session';
+import { getDeviceToken } from './services/api';
 
 export const authGuard = () => {
+  // TEMP-DEBUG (quitar antes del release): decisión del guard + token guardado.
+  console.warn('[TEMP-DEBUG] authGuard →', {
+    isAuthenticated: isAuthenticated(),
+    storedToken: getDeviceToken(),
+  });
   if (isAuthenticated()) return true;
   return inject(Router).navigate(['/auth']);
 };

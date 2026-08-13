@@ -168,6 +168,12 @@ export interface ExchangeResponse {
   deviceName?: string;
 }
 
+/** Respuesta de GET /api/auth/validate: confirma si un device token sigue siendo válido. */
+export interface ValidateTokenResponse {
+  valid: boolean;
+  device?: { id: string; name: string | null };
+}
+
 export interface CreateDeviceInput {
   name?: string;
 }
