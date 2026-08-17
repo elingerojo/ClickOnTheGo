@@ -21,6 +21,7 @@ import type {
   WixBrand,
   WixCategory,
   WixCatalogProduct,
+  WixInventoryItem,
   WixProductPayload,
   WixProductEntity,
   WixSiteProperties,
@@ -76,6 +77,15 @@ export interface WixCatalogClient {
   queryBySkuV3(sku: string): Promise<WixProductEntity | null>;
   /** (F6) Lista de marcas del sitio (REST POST /stores/v3/brands/query, sin params). */
   queryBrands(): Promise<WixBrand[]>;
+  /**
+   * (F6) Crea un inventory item (entidad donde vive la CANTIDAD real) para la
+   * variante de un producto. `products-with-inventory` NO lo crea (F6a real).
+   */
+  createInventoryItem(input: {
+    productId: string;
+    variantId: string;
+    quantity: number;
+  }): Promise<WixInventoryItem>;
 }
 
 /** Error de conflicto de revisión (edición concurrente en el dashboard de Wix). */
@@ -159,9 +169,26 @@ class MockWixClient implements WixCatalogClient {
       seoData: product.seoData ?? { tags: [] },
     };
     this.store.set(sku, entity);
+    const inv = product.variantsInfo?.variants?.[0]?.inventoryItem;
     return {
       product: { id: entity._id, revision: entity.revision },
-      inventoryOptions: payload.inventoryOptions,
+      inventoryResults: {
+        results: inv
+          ? [
+              {
+                itemMetadata: { id: randomUUID(), originalIndex: 0, success: true },
+                item: {
+                  id: randomUUID(),
+                  productId: entity._id,
+                  variantId: randomUUID(),
+                  quantity: inv.quantity,
+                  trackQuantity: inv.trackQuantity,
+                  availabilityStatus: 'IN_STOCK',
+                },
+              },
+            ]
+          : [],
+      },
     };
   }
 
@@ -171,6 +198,21 @@ class MockWixClient implements WixCatalogClient {
       { _id: 'mock-brand-2', name: 'Adidas' },
       { _id: 'mock-brand-3', name: 'Puma' },
     ];
+  }
+
+  async createInventoryItem(input: {
+    productId: string;
+    variantId: string;
+    quantity: number;
+  }): Promise<WixInventoryItem> {
+    return {
+      id: randomUUID(),
+      productId: input.productId,
+      variantId: input.variantId,
+      quantity: input.quantity,
+      trackQuantity: true,
+      availabilityStatus: 'IN_STOCK',
+    };
   }
 
   async updateProduct(
@@ -413,6 +455,8 @@ class RealWixClient implements WixCatalogClient {
 
   // (F6) Alta de producto CON inventario inicial por REST `fetch` (patrón ya
   // usado en site-properties): Authorization + wix-site-id + JSON.
+  // `returnEntity: true` (docs de Wix) hace que la respuesta devuelva las
+  // entidades de inventario aplicadas (si no, `inventoryResults` sale vacío).
   async createProductWithInventory(
     payload: ProductWithInventoryPayload,
   ): Promise<ProductWithInventoryResponse> {
@@ -426,7 +470,7 @@ class RealWixClient implements WixCatalogClient {
           'wix-site-id': this.siteId,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, returnEntity: true }),
       });
     } catch (err: any) {
       throw new Error(`[wix][createProductWithInventory] Red: ${err?.message ?? err}`);
@@ -475,12 +519,56 @@ class RealWixClient implements WixCatalogClient {
       throw new Error(`[wix][queryBrands] HTTP ${response.status}: ${bodyText.slice(0, 500)}`);
     }
     const data = (await response.json()) as any;
-    const list: Array<{ _id?: string; name?: string }> = Array.isArray(data)
+    // F6a real: `brands/query` devuelve `{ brands: [{ id, name }] }` (campo `id`, no `_id`).
+    const list: Array<{ id?: string; _id?: string; name?: string }> = Array.isArray(data)
       ? data
       : data?.brands ?? [];
     return list
-      .filter((b) => b._id && b.name)
-      .map((b) => ({ _id: b._id!, name: b.name! }));
+      .filter((b) => (b.id ?? b._id) && b.name)
+      .map((b) => ({ _id: (b.id ?? b._id)!, name: b.name! }));
+  }
+
+  // (F6) Crea el inventory item (cantidad real) de la variante. Verificado en
+  // F6a real: `products-with-inventory` NO crea el inventory item; hay que
+  // crearlo con este endpoint aparte para que el producto pase a IN_STOCK.
+  async createInventoryItem(input: {
+    productId: string;
+    variantId: string;
+    quantity: number;
+  }): Promise<WixInventoryItem> {
+    const url = 'https://www.wixapis.com/stores/v3/inventory-items';
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: this.apiKey,
+          'wix-site-id': this.siteId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inventoryItem: {
+            productId: input.productId,
+            variantId: input.variantId,
+            trackQuantity: true,
+            quantity: input.quantity,
+          },
+        }),
+      });
+    } catch (err: any) {
+      throw new Error(`[wix][createInventoryItem] Red: ${err?.message ?? err}`);
+    }
+    if (!response.ok) {
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch {
+        /* sin body */
+      }
+      throw new Error(`[wix][createInventoryItem] HTTP ${response.status}: ${bodyText.slice(0, 500)}`);
+    }
+    const data = (await response.json()) as { inventoryItem?: WixInventoryItem };
+    return data.inventoryItem ?? (data as unknown as WixInventoryItem);
   }
 }
 

@@ -142,19 +142,28 @@ export interface ProductWithInventoryBuildOptions {
   includeDescriptionMediaSeo?: boolean;
 }
 
-/** Construye el payload de `stores/v3/products-with-inventory` (mínimo como piso + bajo costo). */
+/** Construye el payload de `stores/v3/products-with-inventory` (mínimo como piso + bajo costo).
+ * Shape validado en F6a REAL:
+ *  - `variantsInfo.variants[0].choices` = ARRAY (un objeto da HTTP 400 "Expected an array").
+ *  - `variantsInfo.variants[0].price.actualPrice` = `{ amount: string, currency }` (obligatorio).
+ *  - `description` = OBJETO `{ text }` (un string da HTTP 400 "Expected an object").
+ *  - `inventoryOptions.variants[0].choices` = ARRAY.
+ *  - `media` NO se envía: shape sin validar y la subida real a wix-media-backend
+ *    sigue pendiente (§8.3: si un campo no se acepta/confirma, se omite sin bloquear).
+ */
 export function buildProductWithInventoryPayload(
   product: {
     name: string;
     description?: string | null;
     price?: number | null;
+    currency?: string;
     sku: string;
     jsonLd?: JsonLdProduct | null;
   },
-  imageUrls: string[],
   opts: ProductWithInventoryBuildOptions,
 ): ProductWithInventoryPayload {
   const include = opts.includeDescriptionMediaSeo ?? true;
+  const currency = product.currency || 'USD';
   return {
     product: {
       name: product.name,
@@ -169,26 +178,25 @@ export function buildProductWithInventoryPayload(
       variantsInfo: {
         variants: [
           {
-            choices: {},
-            priceData: { price: product.price != null ? String(product.price) : '0' },
+            choices: [],
+            price: {
+              actualPrice: {
+                amount: product.price != null ? String(product.price) : '0',
+                currency,
+              },
+            },
+            // Inventory item DENTRO de la variante (docs + F6a real): crea la
+            // CANTIDAD en la misma llamada. Sin esto, el producto queda OUT_OF_STOCK.
+            inventoryItem: { trackQuantity: true, quantity: opts.quantity },
           },
         ],
       },
-      ...(include && product.description ? { description: product.description } : {}),
-      ...(include && imageUrls.length
-        ? { media: { mediaItems: imageUrls.map((url) => ({ url })) } }
+      ...(include && product.description
+        ? { description: { text: product.description } }
         : {}),
       ...(include && product.jsonLd
         ? { seoData: { tags: [toSchemaTag(product.jsonLd)] } }
         : {}),
-    },
-    inventoryOptions: {
-      variants: [
-        {
-          choices: {},
-          inventoryOptions: { trackInventory: true, quantity: opts.quantity },
-        },
-      ],
     },
   };
 }

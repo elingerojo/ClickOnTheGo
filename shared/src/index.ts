@@ -318,19 +318,25 @@ export interface WixSiteProperties {
  * Wix Catalog V3 (alta con inventario) — stores/v3/products-with-inventory
  * ------------------------------------------------------------------------- */
 
-/** Variante base del producto (mapeo de `variantsInfo.variants`). */
-export interface ProductWithInventoryVariant {
-  choices?: Record<string, string>;
-  priceData: { price: string };
+/** Precio de la variante de producto — `actualPrice` es un objeto con `amount`
+ * (string decimal) y `currency`. Validado en F6a real: `price.actualPrice` como
+ * string → HTTP 400 "Expected an object"; `actualPrice.amount` es obligatorio.
+ */
+export interface ProductVariantPrice {
+  actualPrice: { amount: string; currency?: string };
 }
 
-/** Opción de inventario hermana obligatoria (mismo orden que las variantes). */
-export interface InventoryVariantOption {
-  choices?: Record<string, string>;
-  inventoryOptions: {
-    trackInventory: boolean;
-    quantity: number;
-  };
+/** Variante base del producto (mapeo de `variantsInfo.variants`).
+ * `choices` es un ARRAY de `{ optionName, value }` — validado en F6a real:
+ * un objeto `{}` da HTTP 400 "Expected an array for field choices".
+ * `inventoryItem` DENTRO de la variante crea el inventory item (cantidad) en la
+ * MISMA llamada (docs de Wix + F6a real): si no se envía, no se crea inventario
+ * y el producto queda OUT_OF_STOCK. Campo `trackQuantity` (no `trackInventory`).
+ */
+export interface ProductWithInventoryVariant {
+  choices?: Array<{ optionName?: string; value?: string }>;
+  price: ProductVariantPrice;
+  inventoryItem?: { trackQuantity: boolean; quantity: number };
 }
 
 /** Contrato del body de `POST /stores/v3/products-with-inventory` (Catalog V3). */
@@ -346,20 +352,37 @@ export interface ProductWithInventoryPayload {
       variants: ProductWithInventoryVariant[];
     };
     // De bajo costo/beneficio; se incluyen si el spike F6a confirma que el
-    // endpoint los acepta sin costo:
-    description?: string;
+    // endpoint los acepta sin costo. `description` es un OBJETO (validado en
+    // F6a real: un string da HTTP 400 "Expected an object").
+    description?: { text?: string; plainText?: string; richText?: string };
     media?: { mediaItems?: Array<{ url?: string; title?: string }> };
     seoData?: { tags?: unknown[] };
   };
-  inventoryOptions: {
-    variants: InventoryVariantOption[];
-  };
+  /** Devuelve las entidades de inventario en la respuesta (docs: default false). */
+  returnEntity?: boolean;
 }
 
 /** Contrato de la respuesta de `POST /stores/v3/products-with-inventory`. */
 export interface ProductWithInventoryResponse {
   product: { id: string; revision?: string | number; [k: string]: unknown };
+  /** Aplicación de inventario por variante (F6a real: `inventoryResults.results`). */
+  inventoryResults?: { results?: Array<Record<string, unknown>> };
   inventoryOptions?: { variants?: Array<{ inventoryOptions?: { quantity?: number } }> };
+}
+
+/** Inventory item de Wix (módulo inventory-items-v3): entidad donde vive la CANTIDAD real.
+ * `products-with-inventory` NO la crea; hay que crearla aparte con `createInventoryItem`.
+ */
+export interface WixInventoryItem {
+  id: string;
+  productId: string;
+  variantId: string;
+  locationId?: string;
+  quantity?: number;
+  trackQuantity?: boolean;
+  inStock?: boolean;
+  availabilityStatus?: string;
+  [k: string]: unknown;
 }
 
 /** Marca de Wix (GET/POST stores/v3/brands) para el selector y el alta `brand: { id }`. */

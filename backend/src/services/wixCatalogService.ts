@@ -54,15 +54,21 @@ export async function upsertProductV3(
   }
 
   const tag = `COTG-${new Date().toISOString().slice(0, 10)}`;
-  const payload = buildProductWithInventoryPayload(product, product.imageUrls, {
+  const payload = buildProductWithInventoryPayload(product, {
     quantity: opts.quantity,
     visible: opts.visible,
     brandId: opts.brandId,
     tag,
   });
   const response = await client.createProductWithInventory(payload);
+
+  // F6a real (docs de Wix): el inventory item (cantidad) se crea en la MISMA
+  // llamada vía `variantsInfo.variants[].inventoryItem`; la respuesta lo
+  // devuelve en `inventoryResults.results[].item.quantity`.
+  const createdItem = (response.inventoryResults?.results?.[0] as any)?.item;
   const inventoryQuantity =
-    response.inventoryOptions?.variants?.[0]?.inventoryOptions?.quantity ?? null;
+    createdItem?.quantity != null ? Number(createdItem.quantity) : null;
+
   return {
     productId: response.product.id,
     revision: response.product.revision ?? null,
