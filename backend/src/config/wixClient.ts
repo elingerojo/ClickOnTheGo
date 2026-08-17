@@ -624,11 +624,18 @@ let instance: WixCatalogClient | null = null;
 
 export function getWixClient(): WixCatalogClient {
   if (instance) return instance;
-  if (env.wixMock || !env.wixApiKey || !env.wixSiteId) {
-    console.warn('[wix] Sin WIX_API_KEY/WIX_SITE_ID → usando ADAPTADOR MOCK (PoC).');
+  const hasApiKey = Boolean(env.wixApiKey);
+  const hasSiteId = Boolean(env.wixSiteId);
+  if (env.wixMock || !hasApiKey || !hasSiteId) {
+    console.warn(
+      `[wix][DIAG] ADAPTADOR MOCK en uso (PoC). apiKeyDefinida=${hasApiKey}, siteIdDefinida=${hasSiteId}. ` +
+        'Revisa WIX_API_KEY/WIX_SITE_ID en Railway y REINICIA el servicio.',
+    );
     instance = new MockWixClient();
   } else {
-    console.log('[wix] Credenciales Wix detectadas → usando cliente REAL (Catalog V3).');
+    console.log(
+      `[wix][DIAG] Cliente REAL (Catalog V3). apiKeyDefinida=${hasApiKey}, siteIdDefinida=${hasSiteId}.`,
+    );
     instance = new RealWixClient(env.wixApiKey!, env.wixSiteId!);
   }
   return instance;

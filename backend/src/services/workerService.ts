@@ -95,6 +95,10 @@ async function processJob(jobId: string): Promise<void> {
   if (!job?.product) return;
   const product = job.product;
 
+  console.log(
+    `[worker][DIAG] Procesando job ${jobId} (sku=${product.sku}, Wix mode=${getWixClient().mode}, ` +
+      `imagenes=${product.imageUrls.length}).`,
+  );
   sseBus.emit({ type: 'job:state', data: job });
   await audit('job:start', { jobId, productId: product.id, sku: product.sku });
 
@@ -142,9 +146,11 @@ async function processJob(jobId: string): Promise<void> {
       `UPDATE jobs SET state = 'success', attempts = attempts + 1, last_error = NULL, updated_at = now() WHERE id = $1`,
       [jobId],
     );
+    // Si result.productId es null (SKU ya existía → 409), se conserva el id
+    // previo con COALESCE en vez de sobrescribirlo con NULL.
     await pool.query(
       `UPDATE products
-          SET status = 'synced', wix_product_id = $1, wix_revision = $2, updated_at = now()
+          SET status = 'synced', wix_product_id = COALESCE($1, wix_product_id), wix_revision = $2, updated_at = now()
         WHERE id = $3`,
       [result.productId, Number(result.revision ?? 0), product.id],
     );
