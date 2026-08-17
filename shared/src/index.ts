@@ -44,6 +44,8 @@ export interface ProductCapture {
   price: number | null;
   currency: string;
   category: string | null;
+  /** Marca de Wix elegida/preseleccionada (nombre, resuelto a `brand: { id }` en el alta). */
+  brand: string | null;
   variants: WixVariants | null;
   jsonLd: JsonLdProduct | null;
   imageUrls: string[];
@@ -61,6 +63,7 @@ export interface ProductDraftInput {
   price?: number | null;
   currency?: string;
   category?: string | null;
+  brand?: string | null;
   commercialId?: string | null;
   imageUrls?: string[];
   variants?: WixVariants | null;
@@ -85,6 +88,8 @@ export interface GeminiProductResult {
   price: number | null;
   currency: string;
   category: string | null;
+  /** Marca de Wix sugerida por Gemini (nombre de la lista disponible; null si no aplica). */
+  brand?: string | null;
   /** Identificador comercial detectado (UPC / ASIN / EAN...). */
   commercialId: string | null;
   variants: GeminiVariant[];
@@ -95,6 +100,8 @@ export interface GeminiProductResult {
 export interface AnalyzeRequest {
   imageUrls: string[];
   category?: string;
+  /** Marca de Wix elegida/preseleccionada por el usuario (nombre). */
+  brand?: string;
 }
 
 export interface AnalyzeResponse {
@@ -249,7 +256,14 @@ export interface GcLimits {
 }
 
 export interface AppSettings {
-  categories: string[];
+  /** Stock inicial con el que se da de alta un producto en Wix (inventario). */
+  defaultQuantity?: number;
+  /** Publicar el producto (visible) al darlo de alta en Wix. Default: true. */
+  visible?: boolean;
+  /** Enviar la categoría elegida a Gemini como referencia (toggle). Default: false. */
+  sendCategoryToGemini?: boolean;
+  /** Enviar la marca elegida a Gemini como referencia (toggle). Default: false. */
+  sendBrandToGemini?: boolean;
   currency: string;
   language: string;
   skuPrefix: string;
@@ -257,7 +271,10 @@ export interface AppSettings {
 }
 
 export interface SettingsUpdate {
-  categories?: string[];
+  defaultQuantity?: number;
+  visible?: boolean;
+  sendCategoryToGemini?: boolean;
+  sendBrandToGemini?: boolean;
   currency?: string;
   language?: string;
   skuPrefix?: string;
@@ -295,6 +312,111 @@ export interface WixProductEntity {
 export interface WixSiteProperties {
   currency: string;
   language: string;
+}
+
+/* ---------------------------------------------------------------------------
+ * Wix Catalog V3 (alta con inventario) — stores/v3/products-with-inventory
+ * ------------------------------------------------------------------------- */
+
+/** Variante base del producto (mapeo de `variantsInfo.variants`). */
+export interface ProductWithInventoryVariant {
+  choices?: Record<string, string>;
+  priceData: { price: string };
+}
+
+/** Opción de inventario hermana obligatoria (mismo orden que las variantes). */
+export interface InventoryVariantOption {
+  choices?: Record<string, string>;
+  inventoryOptions: {
+    trackInventory: boolean;
+    quantity: number;
+  };
+}
+
+/** Contrato del body de `POST /stores/v3/products-with-inventory` (Catalog V3). */
+export interface ProductWithInventoryPayload {
+  product: {
+    name: string;
+    productType: 'PHYSICAL';
+    physicalProperties: { sku: string; weight?: number };
+    visible: boolean;
+    brand?: { id: string };
+    tags: { privateTag: { tagIds: string[] } };
+    variantsInfo: {
+      variants: ProductWithInventoryVariant[];
+    };
+    // De bajo costo/beneficio; se incluyen si el spike F6a confirma que el
+    // endpoint los acepta sin costo:
+    description?: string;
+    media?: { mediaItems?: Array<{ url?: string; title?: string }> };
+    seoData?: { tags?: unknown[] };
+  };
+  inventoryOptions: {
+    variants: InventoryVariantOption[];
+  };
+}
+
+/** Contrato de la respuesta de `POST /stores/v3/products-with-inventory`. */
+export interface ProductWithInventoryResponse {
+  product: { id: string; revision?: string | number; [k: string]: unknown };
+  inventoryOptions?: { variants?: Array<{ inventoryOptions?: { quantity?: number } }> };
+}
+
+/** Marca de Wix (GET/POST stores/v3/brands) para el selector y el alta `brand: { id }`. */
+export interface WixBrand {
+  _id: string;
+  name: string;
+}
+
+/** Opción de categoría para el frontend (id + nombre) — `Pick<WixCategory, '_id' | 'name'>`. */
+export type CategoryOption = Pick<WixCategory, '_id' | 'name'>;
+
+/* ---------------------------------------------------------------------------
+ * Wix Catalog V3 (lectura) — Modelos de Referencia (F3)
+ * ------------------------------------------------------------------------- */
+
+/** Categoría referenciada por un producto Catalog V3 (allCategoriesInfo / directCategoriesInfo). */
+export interface WixCategoryInfo {
+  /** ID de la categoría en el catálogo de categorías de Wix (wix.categories.v1.category). */
+  _id?: string | null;
+  /** Índice/orden de la categoría dentro de la lista del producto. */
+  index?: number | null;
+}
+
+/**
+ * Producto de Wix Stores Catalog V3 tal como lo devuelve el SDK real.
+ * Incluye la info de categorías que F3 necesita (`allCategoriesInfo`,
+ * `directCategoriesInfo`, `mainCategoryId`) y los campos base de la extracción
+ * de schema (`productOptions`, `variantsInfo`, `discount`, `media`).
+ * Se mantiene flexible (`[key: string]: unknown`) para no perder campos que el
+ * spike F0 debe verificar.
+ */
+export interface WixCatalogProduct {
+  _id?: string | null;
+  revision?: string | null;
+  sku?: string | null;
+  name?: string | null;
+  description?: string | null;
+  /** Lista de TODAS las categorías del producto (ancestros incluidos). */
+  allCategoriesInfo?: { categories?: WixCategoryInfo[] } | null;
+  /** Lista de categorías DIRECTAS del producto. */
+  directCategoriesInfo?: { categories?: WixCategoryInfo[] } | null;
+  /** Categoría principal que define la estructura del schema (default de ronda). */
+  mainCategoryId?: string | null;
+  productOptions?: unknown[];
+  variantsInfo?: unknown;
+  discount?: unknown;
+  media?: unknown;
+  [key: string]: unknown;
+}
+
+/** Categoría del catálogo de categorías de Wix (wix.categories.v1.category). */
+export interface WixCategory {
+  _id?: string | null;
+  name?: string | null;
+  /** Referencia a la categoría padre (jerarquía). */
+  parentCategory?: { id?: string | null } | null;
+  [key: string]: unknown;
 }
 
 /* ---------------------------------------------------------------------------

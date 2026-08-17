@@ -49,6 +49,7 @@ export function rowToProduct(row: any): ProductCapture {
     price: row.price != null ? Number(row.price) : null,
     currency: row.currency ?? 'USD',
     category: row.category ?? null,
+    brand: row.brand ?? null,
     variants: row.variants ?? null,
     jsonLd: row.json_ld ?? null,
     imageUrls: Array.isArray(row.image_urls) ? row.image_urls : [],

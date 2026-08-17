@@ -22,6 +22,7 @@ const draftSchema = z.object({
   price: z.number().nonnegative().optional().nullable(),
   currency: z.string().max(8).optional(),
   category: z.string().max(100).optional().nullable(),
+  brand: z.string().max(100).optional().nullable(),
   commercialId: z.string().max(60).optional().nullable(),
   imageUrls: z.array(z.string()).optional(),
   variants: z.any().optional(),
@@ -64,8 +65,8 @@ export async function create(req: Request, res: Response): Promise<void> {
     Array.isArray(rawVariants) ? geminiVariantsToWix(rawVariants) : rawVariants;
 
   const { rows } = await query(
-    `INSERT INTO products (sku, name, description, price, currency, category, variants, json_ld, image_urls, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft')
+    `INSERT INTO products (sku, name, description, price, currency, category, brand, variants, json_ld, image_urls, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
      RETURNING *`,
     [
       sku,
@@ -74,6 +75,7 @@ export async function create(req: Request, res: Response): Promise<void> {
       body.price ?? null,
       body.currency ?? settings.currency,
       body.category ?? null,
+      body.brand ?? null,
       JSON.stringify(wixVariants),
       JSON.stringify(jsonLd),
       // image_urls es text[]: pg serializa el arreglo a {} (JSON.stringify

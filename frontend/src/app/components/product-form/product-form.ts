@@ -13,7 +13,13 @@ import {
   resetCapture,
 } from '../../services/capture-store';
 import { createProduct, approveProduct } from '../../services/products';
-import { autoApproved, settings, defaultCategory } from '../../services/session';
+import {
+  autoApproved,
+  settings,
+  defaultCategory,
+  wixBrands,
+  wixCategories,
+} from '../../services/session';
 import type {
   GeminiVariant,
   ProductCapture,
@@ -95,17 +101,26 @@ function toWixVariants(variants: GeminiVariant[]): WixVariants | null {
 
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-slate-600 mb-1">Categoría</label>
+              <label class="block text-sm font-medium text-slate-600 mb-1">Categoría (Wix)</label>
               <select formControlName="category" class="w-full rounded-lg border border-slate-300 px-3 py-2">
                 <option [ngValue]="null">— Sin categoría —</option>
-                <option *ngFor="let c of settings()?.categories ?? []" [ngValue]="c">{{ c }}</option>
+                <option *ngFor="let c of wixCategories()" [ngValue]="c.name">{{ c.name }}</option>
               </select>
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-600 mb-1">Identificador (UPC/ASIN)</label>
-              <input formControlName="commercialId" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
-              <p *ngIf="analysis.fieldErrors?.['commercialId']" class="text-xs text-red-600 mt-1">⚠️ {{ analysis.fieldErrors['commercialId'] }}</p>
+              <label class="block text-sm font-medium text-slate-600 mb-1">Marca (Wix)</label>
+              <select formControlName="brand" class="w-full rounded-lg border border-slate-300 px-3 py-2">
+                <option [ngValue]="null">— Sin marca —</option>
+                <option *ngFor="let b of wixBrands()" [ngValue]="b.name">{{ b.name }}</option>
+              </select>
+              <p class="text-xs text-slate-400 mt-1">Gemini pre-selecciona; el usuario confirma o cambia.</p>
             </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Identificador (UPC/ASIN)</label>
+            <input formControlName="commercialId" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <p *ngIf="analysis.fieldErrors?.['commercialId']" class="text-xs text-red-600 mt-1">⚠️ {{ analysis.fieldErrors['commercialId'] }}</p>
           </div>
 
           <!-- Auto-approve -->
@@ -148,6 +163,8 @@ export class ProductFormComponent implements OnInit {
   imageUrls = pendingImageUrls;
   autoApproved = autoApproved;
   settings = settings;
+  wixCategories = wixCategories;
+  wixBrands = wixBrands;
   saving = signal(false);
   error = signal('');
   lastJob = signal<{ id: string; state: string } | null>(null);
@@ -166,6 +183,7 @@ export class ProductFormComponent implements OnInit {
       price: [analysis?.product.price ?? null],
       currency: [analysis?.product.currency ?? defaults?.currency ?? 'USD'],
       category: [analysis?.product.category ?? defaultCategory() ?? null],
+      brand: [analysis?.product.brand ?? null],
       commercialId: [analysis?.product.commercialId ?? ''],
     });
   }
@@ -181,6 +199,7 @@ export class ProductFormComponent implements OnInit {
     price: number | null;
     currency: string;
     category: string | null;
+    brand: string | null;
     commercialId: string | null;
     imageUrls: string[];
     variants: WixVariants | null;
@@ -192,6 +211,7 @@ export class ProductFormComponent implements OnInit {
       price: v.price != null && v.price !== '' ? Number(v.price) : null,
       currency: (v.currency || 'USD').toUpperCase(),
       category: v.category ?? null,
+      brand: v.brand ?? null,
       commercialId: v.commercialId ? String(v.commercialId).trim() : null,
       imageUrls: this.imageUrls(),
       variants: toWixVariants(pendingAnalysis()?.product.variants ?? []),

@@ -28,6 +28,32 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
 
+-- Marca de Wix elegida para el alta (nombre; se resuelve a `brand: { id }` vía `brands`).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS brand text;
+
+-- Catálogo de categorías de Wix sincronizado (Wix → Neon) para el frontend.
+CREATE TABLE IF NOT EXISTS categories (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    wix_category_id text UNIQUE NOT NULL,
+    name            text NOT NULL,
+    parent_id       text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name);
+
+-- Catálogo de marcas de Wix sincronizado (Wix → Neon) para el frontend y el alta.
+CREATE TABLE IF NOT EXISTS brands (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    wix_brand_id text UNIQUE NOT NULL,
+    name         text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name);
+
 -- Cola productor-consumidor
 CREATE TABLE IF NOT EXISTS jobs (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -85,11 +111,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 
 -- ============================================================
--- Seed de settings por defecto (categorías de ejemplo, moneda, idioma,
--- prefijo SKU y límites del script GC). Se pueden sobrescribir desde
--- el dashboard (Settings) o con PUT /api/settings.
+-- Seed de settings por defecto (moneda, idioma, prefijo SKU, stock inicial,
+-- visibilidad, toggles de referencia a Gemini y límites del script GC).
+-- Las categorías ya NO viven en settings (tabla `categories`).
+-- Se pueden sobrescribir desde el dashboard (Settings) o con PUT /api/settings.
 -- ============================================================
 INSERT INTO settings (key, value) VALUES
-    ('app', '{"categories":["Ropa","Calzado","Accesorios","Electrónica","Hogar","Belleza"],"currency":"USD","language":"es-ES","skuPrefix":"SKU-"}'),
+    ('app', '{"defaultQuantity":50,"visible":true,"sendCategoryToGemini":false,"sendBrandToGemini":false,"currency":"USD","language":"es-ES","skuPrefix":"SKU-"}'),
     ('gc',  '{"blobOkDays":7,"neonOkDays":15,"blobNotOkDays":14,"neonNotOkDays":21,"allDays":21,"skipActiveJobs":true}')
 ON CONFLICT (key) DO NOTHING;

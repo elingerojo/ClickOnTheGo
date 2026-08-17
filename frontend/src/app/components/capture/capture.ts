@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { uploadImage } from '../../services/upload';
 import { analyzeImages } from '../../services/products';
-import { settings, defaultCategory } from '../../services/session';
+import { settings, defaultCategory, wixBrands, wixCategories } from '../../services/session';
 import { setPendingImages, setPendingAnalysis } from '../../services/capture-store';
 
 @Component({
@@ -19,20 +19,35 @@ import { setPendingImages, setPendingAnalysis } from '../../services/capture-sto
       </p>
 
       <div class="bg-white rounded-2xl shadow p-6 space-y-4">
-        <!-- Categoría default de la sesión -->
-        <div>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Categoría</label>
-          <select
-            class="w-full sm:w-64 rounded-lg border border-slate-300 px-3 py-2"
-            [ngModel]="selectedCategory()"
-            (ngModelChange)="onCategoryChange($event)"
-          >
-            <option [ngValue]="null">— Sin categoría —</option>
-            <option *ngFor="let c of settings()?.categories ?? []" [ngValue]="c">{{ c }}</option>
-          </select>
-          <p class="text-xs text-slate-400 mt-1">
-            Se mantiene como default de la sesión (persiste entre productos).
-          </p>
+        <!-- Categoría y marca de Wix (referencias opcionales; solo si sus toggles en Settings están activos) -->
+        <div *ngIf="settings()?.sendCategoryToGemini || settings()?.sendBrandToGemini"
+             class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div *ngIf="settings()?.sendCategoryToGemini">
+            <label class="block text-sm font-medium text-slate-600 mb-1">Categoría (Wix)</label>
+            <select
+              class="w-full rounded-lg border border-slate-300 px-3 py-2"
+              [ngModel]="selectedCategory()"
+              (ngModelChange)="onCategoryChange($event)"
+            >
+              <option [ngValue]="null">— Sin categoría —</option>
+              <option *ngFor="let c of wixCategories()" [ngValue]="c.name">{{ c.name }}</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1">
+              Se mantiene como default de la sesión y se envía a Gemini como referencia.
+            </p>
+          </div>
+          <div *ngIf="settings()?.sendBrandToGemini">
+            <label class="block text-sm font-medium text-slate-600 mb-1">Marca (Wix)</label>
+            <select
+              class="w-full rounded-lg border border-slate-300 px-3 py-2"
+              [ngModel]="selectedBrand()"
+              (ngModelChange)="onBrandChange($event)"
+            >
+              <option [ngValue]="null">— Sin marca —</option>
+              <option *ngFor="let b of wixBrands()" [ngValue]="b.name">{{ b.name }}</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1">Gemini valida si es razonable incluirla.</p>
+          </div>
         </div>
 
         <!-- Selector de fotos / cámara -->
@@ -94,7 +109,10 @@ export class CaptureComponent {
   analyzing = signal(false);
   error = signal('');
   selectedCategory = signal<string | null>(defaultCategory());
+  selectedBrand = signal<string | null>(null);
   settings = settings;
+  wixCategories = wixCategories;
+  wixBrands = wixBrands;
 
   constructor(private readonly router: Router) {}
 
@@ -125,6 +143,10 @@ export class CaptureComponent {
     defaultCategory.set(value); // persiste como default de sesión
   }
 
+  onBrandChange(value: string | null): void {
+    this.selectedBrand.set(value);
+  }
+
   async onAnalyze(): Promise<void> {
     if (this.files().length === 0) return;
     this.analyzing.set(true);
@@ -141,6 +163,7 @@ export class CaptureComponent {
       const result = await analyzeImages({
         imageUrls: urls,
         category: this.selectedCategory() ?? undefined,
+        brand: this.selectedBrand() ?? undefined,
       });
       setPendingAnalysis(result);
       await this.router.navigate(['/producto']);

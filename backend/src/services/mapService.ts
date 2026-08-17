@@ -13,7 +13,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type {
   GeminiProductResult,
   JsonLdProduct,
-  WixProductPayload,
+  ProductWithInventoryPayload,
   WixVariants,
 } from '@click-on-the-go/shared';
 
@@ -34,6 +34,8 @@ export const geminiProductSchema = z.object({
   price: z.number().nonnegative().nullable().optional(),
   currency: z.string().max(8).default('USD'),
   category: z.string().max(100).nullable().optional(),
+  /** Marca de Wix sugerida (debe ser uno de los nombres disponibles; null si no aplica). */
+  brand: z.string().max(100).nullable().optional(),
   commercialId: z.string().max(60).nullable().optional(),
   variants: z.array(geminiVariantSchema).default([]),
 });
@@ -68,6 +70,7 @@ export function coerceGeminiOutput(data: any): GeminiOutput {
     price: typeof data?.price === 'number' && data.price >= 0 ? data.price : null,
     currency: typeof data?.currency === 'string' ? data.currency : 'USD',
     category: typeof data?.category === 'string' ? data.category : null,
+    brand: typeof data?.brand === 'string' ? data.brand : null,
     commercialId: typeof data?.commercialId === 'string' ? data.commercialId : null,
     variants: Array.isArray(data?.variants) ? data.variants : [],
   };
@@ -121,38 +124,72 @@ export function toSchemaTag(jsonLd: JsonLdProduct): {
 }
 
 /* ---------------------------------------------------------------------------
- * Salida 2: Payload Wix Catalog V3
+ * Salida 2: Payload Wix Catalog V3 — alta con inventario (F6)
  * ------------------------------------------------------------------------- */
 
-export function buildWixPayload(
+export interface ProductWithInventoryBuildOptions {
+  /** Stock inicial (inventario) con el que se crea el producto. */
+  quantity: number;
+  /** Peso físico (kg/lb) opcional en `physicalProperties`. */
+  weight?: number;
+  /** Publicar el producto en Wix (settings del usuario). */
+  visible: boolean;
+  /** Id de la marca de Wix elegida → `product.brand: { id }` (si aplica). */
+  brandId?: string;
+  /** Tag privado a inyectar en `tags.privateTag.tagIds` (p. ej. `COTG-{fecha}`). */
+  tag: string;
+  /** Incluir description/media/seoData (si el spike F6a confirma que se aceptan). Default: true. */
+  includeDescriptionMediaSeo?: boolean;
+}
+
+/** Construye el payload de `stores/v3/products-with-inventory` (mínimo como piso + bajo costo). */
+export function buildProductWithInventoryPayload(
   product: {
-    sku: string;
     name: string;
     description?: string | null;
     price?: number | null;
-    currency?: string;
-    variants?: WixVariants | null;
+    sku: string;
     jsonLd?: JsonLdProduct | null;
   },
   imageUrls: string[],
-): WixProductPayload {
+  opts: ProductWithInventoryBuildOptions,
+): ProductWithInventoryPayload {
+  const include = opts.includeDescriptionMediaSeo ?? true;
   return {
-    name: product.name,
-    sku: product.sku,
-    description: product.description ?? undefined,
-    productType: 'physical',
-    visible: true,
-    priceData: {
-      ...(product.price != null ? { price: product.price } : {}),
-      ...(product.currency ? { currency: product.currency } : {}),
+    product: {
+      name: product.name,
+      productType: 'PHYSICAL',
+      physicalProperties: {
+        sku: product.sku,
+        ...(opts.weight != null ? { weight: opts.weight } : {}),
+      },
+      visible: opts.visible,
+      ...(opts.brandId ? { brand: { id: opts.brandId } } : {}),
+      tags: { privateTag: { tagIds: [opts.tag] } },
+      variantsInfo: {
+        variants: [
+          {
+            choices: {},
+            priceData: { price: product.price != null ? String(product.price) : '0' },
+          },
+        ],
+      },
+      ...(include && product.description ? { description: product.description } : {}),
+      ...(include && imageUrls.length
+        ? { media: { mediaItems: imageUrls.map((url) => ({ url })) } }
+        : {}),
+      ...(include && product.jsonLd
+        ? { seoData: { tags: [toSchemaTag(product.jsonLd)] } }
+        : {}),
     },
-    ...(imageUrls.length
-      ? { media: { mediaItems: imageUrls.map((url) => ({ url })) } }
-      : {}),
-    manageVariants: Boolean(product.variants?.productOptions?.length),
-    productOptions: product.variants?.productOptions ?? [],
-    variantsInfo: product.variants?.variantsInfo ?? { variants: [] },
-    ...(product.jsonLd ? { seoData: { tags: [toSchemaTag(product.jsonLd)] } } : {}),
+    inventoryOptions: {
+      variants: [
+        {
+          choices: {},
+          inventoryOptions: { trackInventory: true, quantity: opts.quantity },
+        },
+      ],
+    },
   };
 }
 
@@ -201,6 +238,7 @@ export function toGeminiProductResult(
     price: data.price ?? null,
     currency: data.currency || 'USD',
     category: data.category ?? null,
+    brand: data.brand ?? null,
     commercialId: data.commercialId ?? null,
     variants: data.variants ?? [],
     jsonLd,

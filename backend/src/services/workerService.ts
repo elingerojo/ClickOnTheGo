@@ -15,7 +15,8 @@
 import { pool } from '../config/db.js';
 import { sseBus } from '../config/sse.js';
 import { getWixClient } from '../config/wixClient.js';
-import { upsertProductWithRetry } from './wixCatalogService.js';
+import { upsertProductV3 } from './wixCatalogService.js';
+import { getSettings } from './settingsService.js';
 import { audit } from './auditService.js';
 import { JOB_PRODUCT_SELECT, rowToJobWithProduct } from './mappers.js';
 import type { Job, ProductCapture } from '@click-on-the-go/shared';
@@ -114,10 +115,29 @@ async function processJob(jobId: string): Promise<void> {
       sseBus.emit({ type: 'product:updated', data: product });
     }
 
-    // 2) UPSERT por SKU (con reintento por conflicto de revisión)
-    const result = await upsertProductWithRetry(product);
+    // 2) Alta en Wix Catalog V3 con inventario (F6): settings + marca resuelta
+    const settings = await getSettings();
+    const quantity = settings.defaultQuantity ?? 50;
+    const visible = settings.visible ?? true;
 
-    // 3) Éxito
+    // Resolver la marca elegida (nombre) → id de Wix vía la tabla `brands`
+    let brandId: string | undefined;
+    if (product.brand) {
+      const { rows } = await pool.query(
+        'SELECT wix_brand_id FROM brands WHERE name = $1 LIMIT 1',
+        [product.brand],
+      );
+      brandId = rows[0]?.wix_brand_id;
+      if (!brandId) {
+        console.warn(
+          `[worker] Marca "${product.brand}" no encontrada en brands; alta sin marca.`,
+        );
+      }
+    }
+
+    const result = await upsertProductV3(product, { quantity, visible, brandId });
+
+    // 3) Éxito (creado o SKU ya existente → sin inventario nuevo)
     await pool.query(
       `UPDATE jobs SET state = 'success', attempts = attempts + 1, last_error = NULL, updated_at = now() WHERE id = $1`,
       [jobId],
@@ -126,7 +146,7 @@ async function processJob(jobId: string): Promise<void> {
       `UPDATE products
           SET status = 'synced', wix_product_id = $1, wix_revision = $2, updated_at = now()
         WHERE id = $3`,
-      [result._id, Number(result.revision), product.id],
+      [result.productId, Number(result.revision ?? 0), product.id],
     );
     const done = await loadJobWithProduct(jobId);
     if (done) sseBus.emit({ type: 'job:state', data: done });
@@ -134,7 +154,9 @@ async function processJob(jobId: string): Promise<void> {
       jobId,
       productId: product.id,
       sku: product.sku,
-      wixProductId: result._id,
+      wixProductId: result.productId,
+      created: result.created,
+      inventoryQuantity: result.inventoryQuantity,
     });
   } catch (err: any) {
     await handleJobError(jobId, product, err);

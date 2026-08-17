@@ -14,6 +14,8 @@ export interface ListProductsResponse {
 export interface AnalyzeRequestPayload {
   imageUrls: string[];
   category?: string;
+  /** Marca de Wix elegida/preseleccionada (nombre) enviada a Gemini. */
+  brand?: string;
 }
 
 export function listProducts(status?: string): Promise<ListProductsResponse> {

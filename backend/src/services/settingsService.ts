@@ -1,12 +1,17 @@
 /**
- * Lectura/escritura de la tabla `settings` (config central):
- * categorías Wix, moneda, idioma, prefijo SKU y límites del script GC.
+ * Lectura/escritura de la tabla `settings` (config central): moneda, idioma,
+ * prefijo SKU, stock inicial / visibilidad / toggles de referencia a Gemini,
+ * y límites del script GC. Las categorías y marcas de Wix viven en las tablas
+ * `categories`/`brands` (ya NO en settings).
  */
 import { query } from '../config/db.js';
 import type { AppSettings, GcLimits, SettingsUpdate } from '@click-on-the-go/shared';
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  categories: ['Ropa', 'Calzado', 'Accesorios', 'Electrónica', 'Hogar', 'Belleza'],
+  defaultQuantity: 50,
+  visible: true,
+  sendCategoryToGemini: false,
+  sendBrandToGemini: false,
   currency: 'USD',
   language: 'es-ES',
   skuPrefix: 'SKU-',
@@ -27,7 +32,21 @@ export async function getSettings(): Promise<AppSettings> {
   const app = rows.find((r) => r.key === 'app')?.value ?? {};
   const gc = rows.find((r) => r.key === 'gc')?.value ?? {};
   return {
-    categories: Array.isArray(app.categories) ? app.categories : DEFAULT_SETTINGS.categories,
+    // `categories` de BD viejas se ignora (sin migración): ya no existe en el contrato.
+    defaultQuantity:
+      typeof app.defaultQuantity === 'number' && app.defaultQuantity >= 0
+        ? app.defaultQuantity
+        : DEFAULT_SETTINGS.defaultQuantity,
+    visible:
+      typeof app.visible === 'boolean' ? app.visible : DEFAULT_SETTINGS.visible,
+    sendCategoryToGemini:
+      typeof app.sendCategoryToGemini === 'boolean'
+        ? app.sendCategoryToGemini
+        : DEFAULT_SETTINGS.sendCategoryToGemini,
+    sendBrandToGemini:
+      typeof app.sendBrandToGemini === 'boolean'
+        ? app.sendBrandToGemini
+        : DEFAULT_SETTINGS.sendBrandToGemini,
     currency: typeof app.currency === 'string' ? app.currency : DEFAULT_SETTINGS.currency,
     language: typeof app.language === 'string' ? app.language : DEFAULT_SETTINGS.language,
     skuPrefix: typeof app.skuPrefix === 'string' ? app.skuPrefix : DEFAULT_SETTINGS.skuPrefix,
@@ -38,7 +57,10 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(update: SettingsUpdate): Promise<AppSettings> {
   const current = await getSettings();
   const app = {
-    categories: update.categories ?? current.categories,
+    defaultQuantity: update.defaultQuantity ?? current.defaultQuantity,
+    visible: update.visible ?? current.visible,
+    sendCategoryToGemini: update.sendCategoryToGemini ?? current.sendCategoryToGemini,
+    sendBrandToGemini: update.sendBrandToGemini ?? current.sendBrandToGemini,
     currency: update.currency ?? current.currency,
     language: update.language ?? current.language,
     skuPrefix: update.skuPrefix ?? current.skuPrefix,

@@ -24,7 +24,10 @@ const gcSchema = z
   .optional();
 
 const settingsUpdateSchema = z.object({
-  categories: z.array(z.string().min(1)).optional(),
+  defaultQuantity: z.number().int().min(0).optional(),
+  visible: z.boolean().optional(),
+  sendCategoryToGemini: z.boolean().optional(),
+  sendBrandToGemini: z.boolean().optional(),
   currency: z.string().max(8).optional(),
   language: z.string().max(20).optional(),
   skuPrefix: z.string().max(20).optional(),

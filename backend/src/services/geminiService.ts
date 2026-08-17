@@ -41,32 +41,77 @@ async function downloadImageAsBase64(url: string): Promise<DownloadedImage> {
   return { mimeType, base64: buffer.toString('base64') };
 }
 
-function buildPrompt(category?: string): string {
-  const cat = category?.trim() ? ` La categoría elegida por el usuario es "${category}".` : '';
-  return (
-    `Analiza las fotos de un producto para una tienda eCommerce Wix.` +
-    ` Extrae la información más probable de cada campo del JSON.${cat}` +
-    ` El campo "commercialId" debe ser el identificador comercial impreso en el producto` +
-    ` (UPC, EAN, ASIN, número de modelo o de pieza) si es legible; si no, null.` +
-    ` "price" debe ser un número (usa el punto como decimal), o null si no es visible.` +
-    ` "currency" usa código ISO 4217 (ej. MXN, USD).` +
-    ` "variants" lista las opciones (ej. Talla: M) y sus precios/SKU si aplican.` +
-    ` Devuelve únicamente JSON válido con la forma del responseSchema.`
-  );
+export interface AnalyzeOptions {
+  /** Categoría elegida/preseleccionada por el usuario (nombre). */
+  category?: string;
+  /** Marca elegida/preseleccionada por el usuario (nombre). */
+  brand?: string;
+  /** Nombres de categorías disponibles (desde la tabla `categories`). */
+  availableCategories?: string[];
+  /** Nombres de marcas disponibles (desde la tabla `brands`). */
+  availableBrands?: string[];
+  /** Enviar categoría a Gemini como referencia (settings toggle). */
+  sendCategory?: boolean;
+  /** Enviar marca a Gemini como referencia (settings toggle). */
+  sendBrand?: boolean;
 }
 
-function mockAnalyze(imageUrls: string[], category?: string): AnalyzeResponse {
+function buildPrompt(opts: AnalyzeOptions = {}): string {
+  const parts: string[] = [
+    'Analiza las fotos de un producto para una tienda eCommerce Wix.',
+    ' Extrae la información más probable de cada campo del JSON.',
+  ];
+
+  if (opts.sendCategory && opts.category?.trim()) {
+    parts.push(` La categoría elegida por el usuario es "${opts.category}".`);
+  }
+  if (opts.sendCategory && opts.availableCategories?.length) {
+    parts.push(
+      ` Categorías disponibles de la tienda: ${opts.availableCategories.join(', ')}.` +
+        ' Si tiene sentido, usa una de esas categorías en "category"; si no, null.',
+    );
+  }
+
+  if (opts.sendBrand) {
+    if (opts.brand?.trim()) {
+      parts.push(` La marca elegida por el usuario es "${opts.brand}".`);
+    }
+    if (opts.availableBrands?.length) {
+      parts.push(
+        ` Marcas disponibles de la tienda: ${opts.availableBrands.join(', ')}.` +
+          ' Valida si es razonable incluir la marca del producto: si es visible/identificable' +
+          ' y está entre las disponibles, ponla en "brand"; si no, null.',
+      );
+    }
+  }
+
+  parts.push(
+    ` El campo "commercialId" debe ser el identificador comercial impreso en el producto` +
+      ` (UPC, EAN, ASIN, número de modelo o de pieza) si es legible; si no, null.` +
+      ` "price" debe ser un número (usa el punto como decimal), o null si no es visible.` +
+      ` "currency" usa código ISO 4217 (ej. MXN, USD).` +
+      ` "variants" lista las opciones (ej. Talla: M) y sus precios/SKU si aplican.` +
+      ` Devuelve únicamente JSON válido con la forma del responseSchema.`,
+  );
+
+  return parts.join('');
+}
+
+function mockAnalyze(imageUrls: string[], opts: AnalyzeOptions = {}): AnalyzeResponse {
   const index = imageUrls.length;
   const price = 199 + index * 100;
   const currency = 'USD';
-  const name = category ? `Producto de ejemplo (${category})` : 'Producto de ejemplo';
+  const name = opts.category
+    ? `Producto de ejemplo (${opts.category})`
+    : 'Producto de ejemplo';
   const data: GeminiOutput = {
     name,
     description:
       'Producto capturado en modo demo (GEMINI_MOCK). Reemplaza esta descripción con la real antes de aprobar.',
     price,
     currency,
-    category: category ?? null,
+    category: opts.sendCategory ? (opts.category ?? null) : null,
+    brand: opts.sendBrand ? (opts.brand ?? null) : null,
     commercialId: null,
     variants: [
       { name: 'Talla', value: 'M', price },
@@ -81,12 +126,12 @@ function mockAnalyze(imageUrls: string[], category?: string): AnalyzeResponse {
 
 export async function analyzeProduct(
   imageUrls: string[],
-  category?: string,
+  opts: AnalyzeOptions = {},
 ): Promise<AnalyzeResponse> {
   // Modo demo / sin API key
   if (!env.geminiApiKey || process.env.GEMINI_MOCK === '1') {
     console.warn('[gemini] Modo demo (sin GEMINI_API_KEY o GEMINI_MOCK=1).');
-    return mockAnalyze(imageUrls, category);
+    return mockAnalyze(imageUrls, opts);
   }
 
   const genai = new GoogleGenAI({ apiKey: env.geminiApiKey });
@@ -94,7 +139,7 @@ export async function analyzeProduct(
 
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> =
     images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
-  parts.push({ text: buildPrompt(category) });
+  parts.push({ text: buildPrompt(opts) });
 
   const response = await genai.models.generateContent({
     model: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',

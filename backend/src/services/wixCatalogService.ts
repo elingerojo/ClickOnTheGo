@@ -1,57 +1,72 @@
 /**
- * Servicio de UPSERT por SKU contra Wix Catalog V3 (sección 5.2 del plan).
+ * Escritura de productos en Wix Catalog V3 con inventario inicial (F6).
  *
- * 1. `queryProducts().eq('sku', sku)`.
- * 2. Si existe: filtra tags JSON-LD antiguos, inyecta el nuevo y CONSERVA
- *    `productOptions` y `variantsInfo` de la revisión actual (evita que
- *    Catalog V3 borre los arreglos omitidos). `updateProduct` con `revision`.
- * 3. Si no existe: `createProduct` con el JSON-LD en `seoData.tags`.
+ * 1. `queryBySkuV3(sku)` → si NO existe: `buildProductWithInventoryPayload` +
+ *    `createProductWithInventory` (stock inicial + `visible` + tag privado
+ *    `COTG-{fecha}` + marca `{ id }` si aplica).
+ * 2. Si EXISTE: NO se recrea (actualizar stock de existentes = fuera de
+ *    alcance, futuro módulo de inventario). Se devuelve el producto existente
+ *    para que el worker marque status/audit sin inventario nuevo.
+ *
+ * NO se usa la vía legacy V1 (products / collectionIds): solo V3.
  */
-import type { ProductCapture, WixProductEntity } from '@click-on-the-go/shared';
-import { getWixClient, WixRevisionConflictError } from '../config/wixClient.js';
-import { buildWixPayload, toSchemaTag } from './mapService.js';
+import type { ProductCapture } from '@click-on-the-go/shared';
+import { getWixClient } from '../config/wixClient.js';
+import { buildProductWithInventoryPayload } from './mapService.js';
 
-export async function upsertProduct(product: ProductCapture): Promise<WixProductEntity> {
-  const client = getWixClient();
-  const existing = await client.queryBySku(product.sku);
-  const payload = buildWixPayload(product, product.imageUrls);
-
-  if (existing) {
-    // Filtrar tags script/ld+json antiguos para no duplicar el marcado
-    const tags = (existing.seoData?.tags ?? []).filter(
-      (t: any) => !(t?.type === 'script' && t?.props?.type === 'application/ld+json'),
-    );
-    if (product.jsonLd) tags.push(toSchemaTag(product.jsonLd));
-
-    payload.seoData = { tags };
-    // Conservar la estructura compleja de la revisión actual en Wix
-    payload.productOptions = existing.productOptions ?? [];
-    payload.variantsInfo = existing.variantsInfo ?? { variants: [] };
-
-    return client.updateProduct(existing._id, {
-      revision: existing.revision,
-      product: payload,
-    });
-  }
-
-  return client.createProduct({ product: payload });
+export interface UpsertV3Options {
+  /** Stock inicial (inventario) — viene de settings (`defaultQuantity`). */
+  quantity: number;
+  /** Publicar el producto — viene de settings (`visible`). */
+  visible: boolean;
+  /** Id de la marca de Wix (resuelto vía tabla `brands`) — opcional. */
+  brandId?: string;
 }
 
-/**
- * UPSERT con reintento ante conflicto de revisión (edición concurrente en el
- * dashboard de Wix): re-lee el producto y reintenta con la revisión nueva.
- */
-export async function upsertProductWithRetry(
+export interface UpsertV3Result {
+  productId: string;
+  revision: string | number | null;
+  /** Cantidad devuelta por Wix en `inventoryOptions` (si aplica). */
+  inventoryQuantity: number | null;
+  /** `true` = se creó en Wix; `false` = SKU ya existía (no se recreó). */
+  created: boolean;
+}
+
+export async function upsertProductV3(
   product: ProductCapture,
-  attemptsLeft = 2,
-): Promise<WixProductEntity> {
-  try {
-    return await upsertProduct(product);
-  } catch (err) {
-    if (err instanceof WixRevisionConflictError && attemptsLeft > 0) {
-      console.warn(`[wix] Conflicto de revisión para "${product.sku}", re-leyendo y reintentando...`);
-      return upsertProductWithRetry(product, attemptsLeft - 1);
-    }
-    throw err;
+  opts: UpsertV3Options,
+): Promise<UpsertV3Result> {
+  const client = getWixClient();
+
+  const existing = await client.queryBySkuV3(product.sku);
+  if (existing) {
+    // No recrear: log y estado sin inventario nuevo (actualizar stock de
+    // existentes = fuera de alcance, futuro módulo de inventario).
+    console.warn(
+      `[wix] SKU "${product.sku}" ya existe en Wix (${existing._id}); no se recrea (sin inventario nuevo).`,
+    );
+    return {
+      productId: existing._id,
+      revision: existing.revision ?? null,
+      inventoryQuantity: null,
+      created: false,
+    };
   }
+
+  const tag = `COTG-${new Date().toISOString().slice(0, 10)}`;
+  const payload = buildProductWithInventoryPayload(product, product.imageUrls, {
+    quantity: opts.quantity,
+    visible: opts.visible,
+    brandId: opts.brandId,
+    tag,
+  });
+  const response = await client.createProductWithInventory(payload);
+  const inventoryQuantity =
+    response.inventoryOptions?.variants?.[0]?.inventoryOptions?.quantity ?? null;
+  return {
+    productId: response.product.id,
+    revision: response.product.revision ?? null,
+    inventoryQuantity,
+    created: true,
+  };
 }

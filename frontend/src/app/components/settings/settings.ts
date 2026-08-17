@@ -8,7 +8,12 @@ import {
   runGc,
   getMyInvitation,
 } from '../../services/settings';
-import { settings } from '../../services/session';
+import {
+  settings,
+  wixBrands,
+  wixCategories,
+  refreshWixReferences,
+} from '../../services/session';
 import { invitationUsed } from '../../services/sse';
 import type { AppSettings, GcResult, InvitationResponse } from '@click-on-the-go/shared';
 import QRCode from 'qrcode';
@@ -23,12 +28,6 @@ import QRCode from 'qrcode';
 
       <!-- Categorías -->
       <form *ngIf="appForm" (ngSubmit)="saveApp()" class="bg-white rounded-2xl shadow p-6 space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Categorías (separadas por coma)</label>
-          <input [(ngModel)]="appForm.categoriesText" name="categories"
-                 class="w-full rounded-lg border border-slate-300 px-3 py-2" />
-        </div>
-
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-slate-600 mb-1">Moneda</label>
@@ -42,10 +41,38 @@ import QRCode from 'qrcode';
           </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium text-slate-600 mb-1">Prefijo SKU</label>
-          <input [(ngModel)]="appForm.skuPrefix" name="skuPrefix" maxlength="20"
-                 class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Prefijo SKU</label>
+            <input [(ngModel)]="appForm.skuPrefix" name="skuPrefix" maxlength="20"
+                   class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Stock inicial</label>
+            <input [(ngModel)]="appForm.defaultQuantity" name="defaultQuantity" type="number" min="0" step="1"
+                   class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <p class="text-xs text-slate-400 mt-1">
+              Inventario con el que se da de alta el producto en Wix.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700 bg-slate-50 rounded-lg p-3">
+            <input type="checkbox" [(ngModel)]="appForm.visible" name="visible"
+                   class="h-4 w-4 accent-brand-600" />
+            Publicar producto (visible)
+          </label>
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700 bg-slate-50 rounded-lg p-3">
+            <input type="checkbox" [(ngModel)]="appForm.sendCategoryToGemini" name="sendCategoryToGemini"
+                   class="h-4 w-4 accent-brand-600" />
+            Enviar categoría a Gemini
+          </label>
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700 bg-slate-50 rounded-lg p-3">
+            <input type="checkbox" [(ngModel)]="appForm.sendBrandToGemini" name="sendBrandToGemini"
+                   class="h-4 w-4 accent-brand-600" />
+            Enviar marca a Gemini
+          </label>
         </div>
 
         <div class="flex items-center gap-3 flex-wrap">
@@ -61,6 +88,39 @@ import QRCode from 'qrcode';
         <p *ngIf="appMessage()" class="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">{{ appMessage() }}</p>
         <p *ngIf="appError()" class="text-sm text-red-600 bg-red-50 rounded-lg p-3">{{ appError() }}</p>
       </form>
+
+      <!-- Referencias Wix (categorías y marcas, solo lectura desde los signals) -->
+      <div class="bg-white rounded-2xl shadow p-6 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="font-semibold">Referencias Wix</h2>
+          <button (click)="refreshWix()" [disabled]="refreshingRefs()"
+                  class="px-4 py-2 rounded-lg bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
+            {{ refreshingRefs() ? 'Actualizando…' : 'Actualizar' }}
+          </button>
+        </div>
+        <p class="text-sm text-slate-500">
+          Categorías y marcas sincronizadas desde tu tienda Wix. Se refrescan en cada inicio de sesión.
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <h3 class="text-sm font-medium text-slate-600 mb-1">Categorías ({{ wixCategories().length }})</h3>
+            <div *ngIf="wixCategories().length" class="flex flex-wrap gap-1.5">
+              <span *ngFor="let c of wixCategories()"
+                    class="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-1">{{ c.name }}</span>
+            </div>
+            <p *ngIf="!wixCategories().length" class="text-xs text-slate-400">Sin categorías sincronizadas.</p>
+          </div>
+          <div>
+            <h3 class="text-sm font-medium text-slate-600 mb-1">Marcas ({{ wixBrands().length }})</h3>
+            <div *ngIf="wixBrands().length" class="flex flex-wrap gap-1.5">
+              <span *ngFor="let b of wixBrands()"
+                    class="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-1">{{ b.name }}</span>
+            </div>
+            <p *ngIf="!wixBrands().length" class="text-xs text-slate-400">Sin marcas sincronizadas.</p>
+          </div>
+        </div>
+        <p *ngIf="refsError()" class="text-sm text-red-600 bg-red-50 rounded-lg p-3">{{ refsError() }}</p>
+      </div>
 
       <!-- Invitación QR -->
       <div class="bg-white rounded-2xl shadow p-6 space-y-3">
@@ -172,13 +232,21 @@ import QRCode from 'qrcode';
   `,
 })
 export class SettingsComponent implements OnInit {
-  /** Config de la app: categorías, moneda, idioma y prefijo SKU. */
+  /** Config de la app: moneda, idioma, prefijo SKU, stock inicial, visibilidad y toggles. */
   appForm: {
-    categoriesText: string;
+    defaultQuantity: number;
+    visible: boolean;
+    sendCategoryToGemini: boolean;
+    sendBrandToGemini: boolean;
     currency: string;
     language: string;
     skuPrefix: string;
   } | null = null;
+
+  wixCategories = wixCategories;
+  wixBrands = wixBrands;
+  refreshingRefs = signal(false);
+  refsError = signal('');
 
   /** Límites del script GC (campo `gc` de la config). */
   gcForm: { gc: AppSettings['gc'] } | null = null;
@@ -248,7 +316,10 @@ export class SettingsComponent implements OnInit {
       const s = await getSettings();
       settings.set(s);
       this.appForm = {
-        categoriesText: s.categories.join(', '),
+        defaultQuantity: s.defaultQuantity ?? 50,
+        visible: s.visible ?? true,
+        sendCategoryToGemini: s.sendCategoryToGemini ?? false,
+        sendBrandToGemini: s.sendBrandToGemini ?? false,
         currency: s.currency,
         language: s.language,
         skuPrefix: s.skuPrefix,
@@ -260,17 +331,17 @@ export class SettingsComponent implements OnInit {
     }
   }
 
-  /** Guarda categorías, moneda, idioma y prefijo SKU (sin tocar `gc`). */
+  /** Guarda moneda, idioma, prefijo SKU, stock inicial, visibilidad y toggles (sin tocar `gc`). */
   async saveApp(): Promise<void> {
     if (!this.appForm) return;
     this.appMessage.set('');
     this.appError.set('');
     try {
       const updated = await putSettings({
-        categories: this.appForm.categoriesText
-          .split(',')
-          .map((c) => c.trim())
-          .filter(Boolean),
+        defaultQuantity: this.appForm.defaultQuantity,
+        visible: this.appForm.visible,
+        sendCategoryToGemini: this.appForm.sendCategoryToGemini,
+        sendBrandToGemini: this.appForm.sendBrandToGemini,
         currency: this.appForm.currency.toUpperCase(),
         language: this.appForm.language,
         skuPrefix: this.appForm.skuPrefix,
@@ -279,6 +350,21 @@ export class SettingsComponent implements OnInit {
       this.appMessage.set('Settings guardados ✔');
     } catch (err) {
       this.appError.set(err instanceof Error ? err.message : 'Error guardando settings');
+    }
+  }
+
+  /** Re-ejecuta los endpoints de categorías/marcas (sync Wix → Neon + signals + caché). */
+  async refreshWix(): Promise<void> {
+    this.refreshingRefs.set(true);
+    this.refsError.set('');
+    try {
+      await refreshWixReferences();
+    } catch (err) {
+      this.refsError.set(
+        err instanceof Error ? err.message : 'Error actualizando referencias de Wix',
+      );
+    } finally {
+      this.refreshingRefs.set(false);
     }
   }
 

@@ -12,9 +12,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createClient, ApiKeyStrategy } from '@wix/sdk';
-import { products } from '@wix/stores';
+import { products, productsV3 } from '@wix/stores';
+import * as categories from '@wix/auto_sdk_categories_categories';
 import { env } from './env.js';
 import type {
+  ProductWithInventoryPayload,
+  ProductWithInventoryResponse,
+  WixBrand,
+  WixCategory,
+  WixCatalogProduct,
   WixProductPayload,
   WixProductEntity,
   WixSiteProperties,
@@ -39,6 +45,37 @@ export interface WixCatalogClient {
    * simulada; en modo real, intenta subir y hace fallback a la URL del Blob.
    */
   uploadImageToMedia(blobUrl: string, title?: string): Promise<string>;
+  /**
+   * (F3/F0) Lee un producto de Stores Catalog V3 por ID. Incluye
+   * `allCategoriesInfo` / `directCategoriesInfo` / `mainCategoryId`.
+   * (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum
+   * `RequestedFields`, p. ej. `ALL_CATEGORIES_INFO` / `DIRECT_CATEGORIES_INFO` /
+   * `DESCRIPTION` / `DISCOUNT_INFO`); los campos regulares siempre se devuelven.
+   */
+  readProductV3(id: string, opts?: { fields?: string[] }): Promise<WixCatalogProduct | null>;
+  /**
+   * (F3/F0) Lista productos de Stores Catalog V3 (paginado por cursor).
+   * Devuelve la primera página y si hay más (`hasMore`).
+   * (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum
+   * `RequestedFields`) en la lista.
+   */
+  queryProductsV3(opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }>;
+  /** (F3/F0) Lista las categorías del catálogo del sitio (wix.categories.v1.category). */
+  queryCategories(): Promise<WixCategory[]>;
+  /**
+   * (F0b) Lee una categoría por ID (wix.categories.v1.category).
+   * `opts.fields` incluye campos OPCIONALES adicionales (enum de categorías:
+   * `DESCRIPTION` / `RICH_CONTENT_DESCRIPTION` / `BREADCRUMBS_INFO`).
+   */
+  readCategoryV3(id: string, opts?: { fields?: string[] }): Promise<WixCategory | null>;
+  /** (F6) Alta de producto CON inventario inicial (stores/v3/products-with-inventory). */
+  createProductWithInventory(
+    payload: ProductWithInventoryPayload,
+  ): Promise<ProductWithInventoryResponse>;
+  /** (F6) Chequeo de existencia por SKU — SOLO V3 (productsV3.queryProducts). */
+  queryBySkuV3(sku: string): Promise<WixProductEntity | null>;
+  /** (F6) Lista de marcas del sitio (REST POST /stores/v3/brands/query, sin params). */
+  queryBrands(): Promise<WixBrand[]>;
 }
 
 /** Error de conflicto de revisión (edición concurrente en el dashboard de Wix). */
@@ -96,6 +133,46 @@ class MockWixClient implements WixCatalogClient {
     return entity;
   }
 
+  async queryBySkuV3(sku: string): Promise<WixProductEntity | null> {
+    return this.store.get(sku) ?? null;
+  }
+
+  async createProductWithInventory(
+    payload: ProductWithInventoryPayload,
+  ): Promise<ProductWithInventoryResponse> {
+    const sku = payload.product.physicalProperties.sku;
+    if (!sku) throw new Error('Mock: falta sku en createProductWithInventory');
+    if (this.store.has(sku)) {
+      // Duplicado de SKU → 409 simulado (detección de "ya existe" sin recrear)
+      const err: any = new Error(`Wix 409: producto con SKU "${sku}" ya existe.`);
+      err.status = 409;
+      throw err;
+    }
+    const product = payload.product;
+    const entity: WixProductEntity = {
+      _id: randomUUID(),
+      revision: 1,
+      sku,
+      name: product.name,
+      productOptions: [],
+      variantsInfo: product.variantsInfo ?? { variants: [] },
+      seoData: product.seoData ?? { tags: [] },
+    };
+    this.store.set(sku, entity);
+    return {
+      product: { id: entity._id, revision: entity.revision },
+      inventoryOptions: payload.inventoryOptions,
+    };
+  }
+
+  async queryBrands(): Promise<WixBrand[]> {
+    return [
+      { _id: 'mock-brand-1', name: 'Nike' },
+      { _id: 'mock-brand-2', name: 'Adidas' },
+      { _id: 'mock-brand-3', name: 'Puma' },
+    ];
+  }
+
   async updateProduct(
     id: string,
     input: { revision: string | number; product: WixProductPayload },
@@ -131,6 +208,31 @@ class MockWixClient implements WixCatalogClient {
     const hash = randomUUID().replace(/-/g, '').slice(0, 16);
     return `https://mock.wixmedia.example/${hash}/${title ?? 'image'}.jpg`;
   }
+
+  // (F0) Stubs: el spike usa SIEMPRE el cliente real, no se mockea la lectura.
+  async readProductV3(_id: string, _opts?: { fields?: string[] }): Promise<WixCatalogProduct | null> {
+    console.warn('[wix] mock: readProductV3 no implementado (F0 usa cliente real).');
+    return null;
+  }
+
+  async queryProductsV3(_opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }> {
+    console.warn('[wix] mock: queryProductsV3 no implementado (F0 usa cliente real).');
+    return { products: [], hasMore: false };
+  }
+
+  async queryCategories(): Promise<WixCategory[]> {
+    return [
+      { _id: 'mock-cat-1', name: 'Ropa' },
+      { _id: 'mock-cat-2', name: 'Calzado' },
+      { _id: 'mock-cat-3', name: 'Accesorios' },
+    ];
+  }
+
+  async readCategoryV3(_id: string, _opts?: { fields?: string[] }): Promise<WixCategory | null> {
+    console.warn('[wix] mock: readCategoryV3 no implementado (F0 usa cliente real).');
+    return null;
+  }
+
 }
 
 /* ---------------------------------------------------------------------------
@@ -140,10 +242,14 @@ class MockWixClient implements WixCatalogClient {
 class RealWixClient implements WixCatalogClient {
   readonly mode = 'real' as const;
   private readonly client: any;
+  private readonly apiKey: string;
+  private readonly siteId: string;
 
   constructor(apiKey: string, siteId: string) {
+    this.apiKey = apiKey;
+    this.siteId = siteId;
     this.client = createClient({
-      modules: { products },
+      modules: { products, productsV3, categories },
       auth: ApiKeyStrategy({ apiKey, siteId }),
     });
     this.client._wixApiKey = apiKey;
@@ -219,6 +325,172 @@ class RealWixClient implements WixCatalogClient {
     );
     return blobUrl;
   }
+
+  // (F3/F0) Lectura real de Stores Catalog V3 con info de categorías.
+  // Nota: `productsV3.getProduct` recibe el `productId` como argumento posicional.
+  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum RequestedFields).
+  async readProductV3(id: string, opts?: { fields?: string[] }): Promise<WixCatalogProduct | null> {
+    try {
+      const res = await this.client.productsV3.getProduct(
+        id,
+        opts?.fields ? { fields: opts.fields } : undefined,
+      );
+      const product = (res as any)?.product ?? res;
+      return product ? (product as WixCatalogProduct) : null;
+    } catch (err: unknown) {
+      throw contextualWixError('readProductV3', err);
+    }
+  }
+
+  // (F3/F0) Paginado por cursor: devuelve la primera página y si hay más.
+  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum RequestedFields).
+  async queryProductsV3(opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }> {
+    const limit = opts?.limit ?? 20;
+    try {
+      const result = await this.client.productsV3
+        .queryProducts(opts?.fields ? { fields: opts.fields } : undefined)
+        .limit(limit)
+        .find();
+      const items = (result?.items ?? []) as WixCatalogProduct[];
+      return { products: items, hasMore: Boolean(result?.hasNext?.()) };
+    } catch (err: unknown) {
+      throw contextualWixError(`queryProductsV3(limit=${limit})`, err);
+    }
+  }
+
+  // (F3/F0) Catálogo de categorías del sitio (wix.categories.v1.category).
+  // Nota: el builder requiere al menos una condición de filtro no vacía; si solo
+  // se pasa `treeReference` en options, Wix responde `INVALID_FILTER` ("empty
+  // condition"). Se añade `.eq('treeReference.appNamespace', '@wix/stores')`.
+  async queryCategories(): Promise<WixCategory[]> {
+    try {
+      const result = await this.client.categories
+        .queryCategories({
+          treeReference: { appNamespace: '@wix/stores' },
+          returnNonVisibleCategories: true,
+        })
+        .eq('treeReference.appNamespace', '@wix/stores')
+        .find();
+      return (result?.items ?? []) as WixCategory[];
+    } catch (err: unknown) {
+      throw contextualWixError('queryCategories(treeReference=@wix/stores)', err);
+    }
+  }
+
+  // (F0b) Lectura de una categoría por ID (wix.categories.v1.category).
+  // `categories.getCategory(id, treeReference, options?)` exige `treeReference`.
+  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum de categorías).
+  async readCategoryV3(id: string, opts?: { fields?: string[] }): Promise<WixCategory | null> {
+    try {
+      const res = await this.client.categories.getCategory(
+        id,
+        { appNamespace: '@wix/stores' },
+        opts?.fields ? { fields: opts.fields } : undefined,
+      );
+      const category = (res as any)?.category ?? res;
+      return category ? (category as WixCategory) : null;
+    } catch (err: unknown) {
+      throw contextualWixError('readCategoryV3', err);
+    }
+  }
+
+  // (F6) Chequeo de existencia por SKU — SOLO V3. Si Wix no acepta el filtro
+  // `eq('sku', ...)` (a confirmar en F6a), se cae a `queryProductsV3` + filtro
+  // en memoria (§8.2 del plan).
+  async queryBySkuV3(sku: string): Promise<WixProductEntity | null> {
+    try {
+      const result = await this.client.productsV3
+        .queryProducts()
+        .eq('sku', sku)
+        .limit(1)
+        .find();
+      const item = (result?.items ?? [])[0];
+      return item ? normalizeWixEntity(item) : null;
+    } catch (err: unknown) {
+      throw contextualWixError(`queryBySkuV3(sku=${sku})`, err);
+    }
+  }
+
+  // (F6) Alta de producto CON inventario inicial por REST `fetch` (patrón ya
+  // usado en site-properties): Authorization + wix-site-id + JSON.
+  async createProductWithInventory(
+    payload: ProductWithInventoryPayload,
+  ): Promise<ProductWithInventoryResponse> {
+    const url = 'https://www.wixapis.com/stores/v3/products-with-inventory';
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: this.apiKey,
+          'wix-site-id': this.siteId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (err: any) {
+      throw new Error(`[wix][createProductWithInventory] Red: ${err?.message ?? err}`);
+    }
+    if (!response.ok) {
+      // §8.8: nunca loguear el body del payload ni la API key completa.
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch {
+        /* sin body */
+      }
+      throw new Error(
+        `[wix][createProductWithInventory] HTTP ${response.status}: ${bodyText.slice(0, 500)}`,
+      );
+    }
+    const data = (await response.json()) as ProductWithInventoryResponse;
+    return data;
+  }
+
+  // (F6) Lista de marcas por REST (POST stores/v3/brands/query, sin params).
+  // Shape a confirmar en F6a; se acepta `{ brands: [] }` o un arreglo directo.
+  async queryBrands(): Promise<WixBrand[]> {
+    const url = 'https://www.wixapis.com/stores/v3/brands/query';
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: this.apiKey,
+          'wix-site-id': this.siteId,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+    } catch (err: any) {
+      throw new Error(`[wix][queryBrands] Red: ${err?.message ?? err}`);
+    }
+    if (!response.ok) {
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch {
+        /* sin body */
+      }
+      throw new Error(`[wix][queryBrands] HTTP ${response.status}: ${bodyText.slice(0, 500)}`);
+    }
+    const data = (await response.json()) as any;
+    const list: Array<{ _id?: string; name?: string }> = Array.isArray(data)
+      ? data
+      : data?.brands ?? [];
+    return list
+      .filter((b) => b._id && b.name)
+      .map((b) => ({ _id: b._id!, name: b.name! }));
+  }
+}
+
+/** Envuelve un error de Wix con el nombre de la operación (diagnóstico F0/F3). */
+function contextualWixError(op: string, err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const wrapped = new Error(`[wix][${op}] ${message}`);
+  (wrapped as { cause?: unknown }).cause = err;
+  console.error(`[wix][${op}] Error:`, message);
+  return wrapped;
 }
 
 /** Normaliza la entidad que devuelve el SDK (con/sin envoltorio `product`). */
@@ -247,6 +519,18 @@ function isRevisionConflict(err: any): boolean {
 /* ---------------------------------------------------------------------------
  * Singleton según configuración
  * ------------------------------------------------------------------------- */
+
+/**
+ * Crea un cliente Wix REAL independiente del singleton (sin fallback a mock).
+ * Lo usa el spike F0 (No-Mock Lectura Wix). Lanza un error claro si faltan
+ * credenciales.
+ */
+export function createRealWixClient(): WixCatalogClient {
+  if (!env.wixApiKey || !env.wixSiteId) {
+    throw new Error('[wix] Faltan WIX_API_KEY/WIX_SITE_ID para crear el cliente REAL.');
+  }
+  return new RealWixClient(env.wixApiKey, env.wixSiteId);
+}
 
 let instance: WixCatalogClient | null = null;
 
