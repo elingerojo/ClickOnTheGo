@@ -2,12 +2,14 @@ import { Component, ElementRef, HostListener, OnInit, effect, signal, ViewChild 
 import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { initSession, isAuthenticated, clearSession } from './services/session';
-import { startSse, stopSse } from './services/sse';
+import { startSse, stopSse, latestJob } from './services/sse';
+import { pendingJobId, setPendingJob, showToast } from './services/toast';
+import { ToastHostComponent } from './components/toast-host/toast-host';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, ToastHostComponent],
   template: `
     <div class="min-h-screen flex flex-col">
       <header *ngIf="isAuthenticated()" class="text-sm bg-brand-700 text-white shadow">
@@ -62,6 +64,9 @@ import { startSse, stopSse } from './services/sse';
       <main class="flex-1 max-w-5xl w-full mx-auto px-4 py-6">
         <router-outlet></router-outlet>
       </main>
+
+      <!-- Host de toasts (F7): siempre montado, vive fuera del router-outlet. -->
+      <app-toast-host></app-toast-host>
     </div>
   `,
 })
@@ -82,6 +87,25 @@ export class AppComponent implements OnInit {
         startSse();
       } else {
         stopSse();
+      }
+    });
+
+    // (F7) Toast del resultado del job vía SSE. El bus SSE es GLOBAL (todos los
+    // dispositivos) con replay de buffer, así que `latestJob` trae eventos de
+    // CUALQUIER job: se filtra por `pendingJobId` (el job recién encolado) y se
+    // reacciona solo a estados terminales (success|error). `setPendingJob(null)`
+    // deduplica ante eventos duplicados del SSE.
+    effect(() => {
+      const job = latestJob();
+      const pid = pendingJobId();
+      if (!job || !pid || job.id !== pid) return;
+      if (job.state !== 'success' && job.state !== 'error') return;
+      setPendingJob(null);
+      if (job.state === 'success') {
+        showToast('Producto publicado en Wix ✅', 'success');
+      } else {
+        const detail = job.lastError ? `: ${job.lastError}` : '';
+        showToast(`Error al publicar${detail} ❌ — revisa el Dashboard.`, 'error');
       }
     });
   }

@@ -148,8 +148,9 @@ export interface ProductWithInventoryBuildOptions {
  *  - `variantsInfo.variants[0].price.actualPrice` = `{ amount: string, currency }` (obligatorio).
  *  - `description` = OBJETO `{ text }` (un string da HTTP 400 "Expected an object").
  *  - `inventoryOptions.variants[0].choices` = ARRAY.
- *  - `media` NO se envía: shape sin validar y la subida real a wix-media-backend
- *    sigue pendiente (§8.3: si un campo no se acepta/confirma, se omite sin bloquear).
+ *  - (F7) `media.mediaItems[{ url, title }]` se emite SI `product.imageUrls` trae
+ *    URLs (el worker las reemplaza por URLs de Wix Media `wix:image://v1/...`
+ *    ANTES del upsert). Shape confirmado por el spike F7 (Vía 1a).
  */
 export function buildProductWithInventoryPayload(
   product: {
@@ -159,11 +160,15 @@ export function buildProductWithInventoryPayload(
     currency?: string;
     sku: string;
     jsonLd?: JsonLdProduct | null;
+    imageUrls?: string[];
   },
   opts: ProductWithInventoryBuildOptions,
 ): ProductWithInventoryPayload {
   const include = opts.includeDescriptionMediaSeo ?? true;
   const currency = product.currency || 'USD';
+  const mediaItems = (product.imageUrls ?? [])
+    .filter((url) => url)
+    .map((url) => ({ url, title: product.name }));
   return {
     product: {
       name: product.name,
@@ -193,6 +198,9 @@ export function buildProductWithInventoryPayload(
       },
       ...(include && product.description
         ? { description: { text: product.description } }
+        : {}),
+      ...(include && mediaItems.length > 0
+        ? { media: { mediaItems } }
         : {}),
       ...(include && product.jsonLd
         ? { seoData: { tags: [toSchemaTag(product.jsonLd)] } }

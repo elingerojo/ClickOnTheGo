@@ -12,6 +12,7 @@ import {
   pendingImageUrls,
   resetCapture,
 } from '../../services/capture-store';
+import { setPendingJob, showToast } from '../../services/toast';
 import { createProduct, approveProduct } from '../../services/products';
 import {
   autoApproved,
@@ -148,10 +149,6 @@ function toWixVariants(variants: GeminiVariant[]): WixVariants | null {
             >Aprobar y encolar 🚀</button>
           </div>
 
-          <p *ngIf="lastJob() as job" class="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">
-            Producto encolado. Job: <strong>{{ job.id }}</strong> — estado
-            <strong>{{ job.state }}</strong>. Ve al <a routerLink="/dashboard" class="underline">Dashboard</a>.
-          </p>
         </form>
       </ng-container>
     </div>
@@ -167,7 +164,6 @@ export class ProductFormComponent implements OnInit {
   wixBrands = wixBrands;
   saving = signal(false);
   error = signal('');
-  lastJob = signal<{ id: string; state: string } | null>(null);
 
   constructor(
     private readonly fb: FormBuilder,
@@ -245,9 +241,19 @@ export class ProductFormComponent implements OnInit {
     try {
       const { product } = await createProduct(this.buildPayload());
       const { job } = await approveProduct(product.id);
-      this.lastJob.set({ id: job.id, state: job.state });
+      // F7: toast de encolado + preparar el toast FINAL vía SSE. `pendingJobId`
+      // se setea ANTES de navegar (el effect vive en AppComponent, siempre
+      // montado) para no perder los eventos del job del bus SSE global.
+      showToast('Producto encolado. Procesando…', 'info');
+      setPendingJob(job.id);
+      // Limpiar la captura y el formulario para la siguiente toma.
+      resetCapture();
+      this.error.set('');
+      void this.router.navigate(['/']);
     } catch (err) {
-      this.error.set(err instanceof Error ? err.message : 'Error al aprobar');
+      const message = err instanceof Error ? err.message : 'Error al aprobar';
+      showToast(`Error al aprobar: ${message} ❌`, 'error');
+      this.error.set(message);
     } finally {
       this.saving.set(false);
     }

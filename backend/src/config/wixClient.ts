@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient, ApiKeyStrategy } from '@wix/sdk';
 import { products, productsV3 } from '@wix/stores';
 import * as categories from '@wix/auto_sdk_categories_categories';
+import { files } from '@wix/media';
 import { env } from './env.js';
 import type {
   ProductWithInventoryPayload,
@@ -41,9 +42,13 @@ export interface WixCatalogClient {
   /** Moneda e idioma del sitio (site-properties v4). */
   getSiteProperties(): Promise<WixSiteProperties>;
   /**
-   * Copia una imagen desde Blob staging a wix-media-backend.
-   * Devuelve la URL definitiva de Wix Media. En el mock devuelve una URL
-   * simulada; en modo real, intenta subir y hace fallback a la URL del Blob.
+   * Importa una imagen desde Blob staging a Wix Media (Media Manager) por URL
+   * (`files.importFile` de `@wix/media`; copia Blob→Wix server-side, sin byte
+   * streaming) y devuelve la URL canónica `wix:image://v1/...` que esperan las
+   * APIs de catálogo/tiendas. En el mock devuelve una URL simulada.
+   * POLÍTICA DE ERROR (F7, confirmada): LANZA si la subida falla — no hay
+   * fallback a la URL del Blob; el error propaga y el worker reintenta/falla
+   * el job (el log queda como rastro forense).
    */
   uploadImageToMedia(blobUrl: string, title?: string): Promise<string>;
   /**
@@ -291,7 +296,7 @@ class RealWixClient implements WixCatalogClient {
     this.apiKey = apiKey;
     this.siteId = siteId;
     this.client = createClient({
-      modules: { products, productsV3, categories },
+      modules: { products, productsV3, categories, files },
       auth: ApiKeyStrategy({ apiKey, siteId }),
     });
     this.client._wixApiKey = apiKey;
@@ -357,15 +362,40 @@ class RealWixClient implements WixCatalogClient {
     }
   }
 
-  async uploadImageToMedia(blobUrl: string, _title?: string): Promise<string> {
-    // TODO (MVP paso 15 del plan): subida real a wix-media-backend con el
-    // módulo `files` de `@wix/media`. Por ahora se conserva la URL staging
-    // del Blob como fuente; el ADAPTADOR MOCK ya simula la copia a Wix Media.
-    console.warn(
-      '[wix] wix-media-backend: subida real pendiente de integrar (MVP). ' +
-        'Se conserva la URL staging del Blob.',
-    );
-    return blobUrl;
+  // (F7) Subida real a Wix Media — Vía 1a (`files.importFile` por URL): la
+  // copia Blob→Wix la hace Wix server-side, sin `fetch`/`File` en el worker.
+  // Verificada en el spike F7 (`@wix/media` + `ApiKeyStrategy`). POLÍTICA DE
+  // ERROR CONFIRMADA: lanzar. Si la subida falla, el error propaga y el worker
+  // reintenta/falla el job (el log queda como rastro forense). NO hay código
+  // de fallback a la URL del Blob.
+  async uploadImageToMedia(blobUrl: string, title?: string): Promise<string> {
+    const filesModule: any = this.client.files;
+    if (!filesModule || typeof filesModule.importFile !== 'function') {
+      throw new Error(
+        '[wix][uploadImageToMedia] Módulo `files` (@wix/media) no disponible. ' +
+          'Evaluar Vía 2 (REST media) como alternativa.',
+      );
+    }
+    const displayName = title || fileNameFromUrl(blobUrl);
+    const mimeType = mimeTypeFromUrl(blobUrl);
+    let importResult: any;
+    try {
+      importResult = await filesModule.importFile(blobUrl, {
+        mediaType: filesModule.MediaType?.IMAGE ?? 'IMAGE',
+        displayName,
+        mimeType,
+      });
+    } catch (err: any) {
+      throw new Error(`[wix][uploadImageToMedia] importFile falló: ${err?.message ?? err}`);
+    }
+    const file: any = importResult?.file;
+    // El URI canónico `wix:image://v1/...` vive en `file.media.image.image`;
+    // `file.url` es un CDN temporal (no el URI que esperan catálogo/tiendas).
+    const wixMediaUrl = file?.media?.image?.image ?? file?.url ?? null;
+    if (!wixMediaUrl) {
+      throw new Error('[wix][uploadImageToMedia] importFile no devolvió wixMediaUrl.');
+    }
+    return wixMediaUrl;
   }
 
   // (F3/F0) Lectura real de Stores Catalog V3 con info de categorías.
@@ -569,6 +599,35 @@ class RealWixClient implements WixCatalogClient {
     }
     const data = (await response.json()) as { inventoryItem?: WixInventoryItem };
     return data.inventoryItem ?? (data as unknown as WixInventoryItem);
+  }
+}
+
+/** Deduce el `mimeType` de una imagen por la extensión de su URL (default jpeg). */
+function mimeTypeFromUrl(url: string): string {
+  const ext = (url.split('?')[0].split('.').pop() ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    avif: 'image/avif',
+    heic: 'image/heic',
+    svg: 'image/svg+xml',
+  };
+  return map[ext] ?? 'image/jpeg';
+}
+
+/** Extrae un nombre de archivo legible de una URL (para `displayName` de importFile). */
+function fileNameFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname;
+    const base = path.split('/').filter(Boolean).pop() ?? 'image';
+    return (base.split('.')[0] || 'image').slice(0, 100);
+  } catch {
+    return 'image';
   }
 }
 

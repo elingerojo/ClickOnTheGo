@@ -355,7 +355,17 @@ export interface ProductWithInventoryPayload {
     // endpoint los acepta sin costo. `description` es un OBJETO (validado en
     // F6a real: un string da HTTP 400 "Expected an object").
     description?: { text?: string; plainText?: string; richText?: string };
-    media?: { mediaItems?: Array<{ url?: string; title?: string }> };
+    // (F7) Media propia de Wix Media (URLs `wix:image://v1/...`): el worker
+    // reemplaza las URLs del Blob por las de Wix Media antes del upsert.
+    // Shape confirmado por el spike F7 (Vía 1a): `mediaItems[{ url, title }]`;
+    // `image.url` se admite como variante de la idea V1 si el spike la confirma.
+    media?: {
+      mediaItems?: Array<{
+        url?: string;
+        title?: string;
+        image?: { url?: string };
+      }>;
+    };
     seoData?: { tags?: unknown[] };
   };
   /** Devuelve las entidades de inventario en la respuesta (docs: default false). */

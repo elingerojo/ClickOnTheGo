@@ -12,13 +12,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:schema": "tsx src/scripts/applySchema.ts",
     "db:token": "tsx src/scripts/generateOneTimeToken.ts",
-    "db:spike-create": "tsx src/scripts/spikeCreateWix.ts"
+    "db:spike-create": "tsx src/scripts/spikeCreateWix.ts",
+    "db:spike-media": "tsx src/scripts/spikeWixMediaUpload.ts"
   },
   "dependencies": {
     "@click-on-the-go/shared": "*",
     "@google/genai": "^1.6.0",
     "@vercel/blob": "^2.8.0",
     "@wix/auto_sdk_categories_categories": "1.0.135",
+    "@wix/media": "^1.0.270",
     "@wix/sdk": "^1.21.14",
     "@wix/stores": "^1.0.867",
     "cors": "^2.8.5",
