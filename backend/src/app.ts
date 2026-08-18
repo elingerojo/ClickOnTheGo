@@ -17,7 +17,6 @@ import { stream } from './controllers/eventsController.js';
 import { uploadToken } from './controllers/uploadController.js';
 import { analyze } from './controllers/analyzeController.js';
 import * as catalogController from './controllers/catalogController.js';
-import { spikeWixCreate } from './controllers/spikeCreateController.js'; // TEMP F6a - eliminar al terminar F6
 import * as productsController from './controllers/productsController.js';
 import * as jobsController from './controllers/jobsController.js';
 import * as settingsController from './controllers/settingsController.js';
@@ -65,9 +64,6 @@ export async function startServer(): Promise<void> {
   // Referencias Wix para el frontend (sync Wix → Neon + lista)
   app.get('/api/categories', requireDevice, asyncHandler(catalogController.categories));
   app.get('/api/brands', requireDevice, asyncHandler(catalogController.brands));
-
-  // TEMP F6a - spike de validación de ESCRITURA (alta mínima real con inventario). ELIMINAR al terminar F6.
-  app.post('/api/spike/wix-create', requireAdmin, asyncHandler(spikeWixCreate));
 
   app.get('/api/devices', requireDevice, asyncHandler(devicesController.list));
   // Ruta fija antes de :id para que "me" no se interprete como un id.

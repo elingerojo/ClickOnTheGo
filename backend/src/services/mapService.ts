@@ -141,7 +141,9 @@ export interface ProductWithInventoryBuildOptions {
   brandId?: string;
   /** Tag privado a inyectar en `tags.privateTag.tagIds` (p. ej. `COTG-{fecha}`). */
   tag: string;
-  /** Incluir description/media/seoData (si el spike F6a confirma que se aceptan). Default: true. */
+  /** Gate de bajo costo heredado del spike F6a (si el endpoint aceptaba
+   * description/media/seoData). VESTIGIAL: el spike ya se eliminó y en producción
+   * siempre queda `true` (default). Revisar/eliminar en la v1. */
   includeDescriptionMediaSeo?: boolean;
 }
 

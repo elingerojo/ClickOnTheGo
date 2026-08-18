@@ -11,10 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:schema": "tsx src/scripts/applySchema.ts",
-    "db:token": "tsx src/scripts/generateOneTimeToken.ts",
-    "db:spike-create": "tsx src/scripts/spikeCreateWix.ts",
-    "db:spike-media": "tsx src/scripts/spikeWixMediaUpload.ts",
-    "db:spike-desc": "tsx src/scripts/spikeDescriptionRcd.ts"
+    "db:token": "tsx src/scripts/generateOneTimeToken.ts"
   },
   "dependencies": {
     "@click-on-the-go/shared": "*",
