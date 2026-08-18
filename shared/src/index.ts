@@ -351,10 +351,14 @@ export interface ProductWithInventoryPayload {
     variantsInfo: {
       variants: ProductWithInventoryVariant[];
     };
-    // De bajo costo/beneficio; se incluyen si el spike F6a confirma que el
-    // endpoint los acepta sin costo. `description` es un OBJETO (validado en
-    // F6a real: un string da HTTP 400 "Expected an object").
-    description?: { text?: string; plainText?: string; richText?: string };
+    // (F8) Descripción en Rich Content. El spike F8 CONFIRMÓ la **Vía B**:
+    // `plainDescription` acepta un string HTML (generado con `marked` desde el
+    // Markdown de Gemini) y Wix lo convierte a Rich Content Document nativo en
+    // `description` (read-back con nodos PARAGRAPH / BULLETED_LIST). NOTA:
+    // `description` NO acepta un string crudo (HTTP 400 "Expected an object",
+    // Vía A descartada); solo acepta un objeto RCD `{ nodes }` (fallback Vía C).
+    description?: string | { nodes?: unknown[] };
+    plainDescription?: string;
     // (F7) Media propia de Wix Media: el worker reemplaza las URLs del Blob por
     // las de Wix Media antes del upsert. Shape CONFIRMADO por el spike F7 real:
     // `media.itemsInfo.items[]` (cada item con `url` externa + `displayName` +

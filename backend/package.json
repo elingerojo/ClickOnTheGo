@@ -13,7 +13,8 @@
     "db:schema": "tsx src/scripts/applySchema.ts",
     "db:token": "tsx src/scripts/generateOneTimeToken.ts",
     "db:spike-create": "tsx src/scripts/spikeCreateWix.ts",
-    "db:spike-media": "tsx src/scripts/spikeWixMediaUpload.ts"
+    "db:spike-media": "tsx src/scripts/spikeWixMediaUpload.ts",
+    "db:spike-desc": "tsx src/scripts/spikeDescriptionRcd.ts"
   },
   "dependencies": {
     "@click-on-the-go/shared": "*",
@@ -25,6 +26,7 @@
     "@wix/stores": "^1.0.867",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "marked": "^18.0.10",
     "pg": "^8.13.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.23.5"

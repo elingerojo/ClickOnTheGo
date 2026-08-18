@@ -16,6 +16,7 @@ import type {
   ProductWithInventoryPayload,
   WixVariants,
 } from '@click-on-the-go/shared';
+import { convertMarkdownToWixHtml, stripMarkdown } from './richContent.js';
 
 /* ---------------------------------------------------------------------------
  * Zod (frontera A) — salida estructurada de Gemini
@@ -97,7 +98,9 @@ export function buildJsonLd(
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: input.name,
-    ...(input.description ? { description: input.description } : {}),
+    // (F8) schema.org NO debe llevar markdown crudo: se envía la descripción en
+    // TEXTO PLANO (stripMarkdown) para `seoData.tags`.
+    ...(input.description ? { description: stripMarkdown(input.description) } : {}),
     sku: opts.sku,
     ...(input.commercialId ? { mpn: input.commercialId } : {}),
     ...(input.category ? { category: input.category } : {}),
@@ -146,7 +149,10 @@ export interface ProductWithInventoryBuildOptions {
  * Shape validado en F6a REAL:
  *  - `variantsInfo.variants[0].choices` = ARRAY (un objeto da HTTP 400 "Expected an array").
  *  - `variantsInfo.variants[0].price.actualPrice` = `{ amount: string, currency }` (obligatorio).
- *  - `description` = OBJETO `{ text }` (un string da HTTP 400 "Expected an object").
+ *  - (F8) `plainDescription` = string HTML (generado con `marked` desde el
+ *    Markdown de Gemini) → Wix lo convierte a Rich Content en `description`.
+ *    Vía B CONFIRMADA por el spike F8: `description` como string da HTTP 400
+ *    "Expected an object" (Vía A descartada).
  *  - `inventoryOptions.variants[0].choices` = ARRAY.
  *  - (F7) `media.itemsInfo.items[{ url, displayName, mediaType }]` se emite SI
  *    `product.imageUrls` trae URLs (el worker las reemplaza por URLs de Wix Media
@@ -197,8 +203,12 @@ export function buildProductWithInventoryPayload(
           },
         ],
       },
+      // (F8) Vía B confirmada por el spike F8: `plainDescription` acepta HTML
+      // (generado con `marked` desde el Markdown de Gemini) y Wix lo convierte
+      // a Rich Content (`description` como string da HTTP 400 "Expected an
+      // object" → no se usa la Vía A).
       ...(include && product.description
-        ? { description: { text: product.description } }
+        ? { plainDescription: convertMarkdownToWixHtml(product.description) }
         : {}),
       ...(include && mediaItems.length > 0
         ? { media: { itemsInfo: { items: mediaItems } } }

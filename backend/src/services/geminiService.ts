@@ -91,6 +91,12 @@ function buildPrompt(opts: AnalyzeOptions = {}): string {
       ` "price" debe ser un número (usa el punto como decimal), o null si no es visible.` +
       ` "currency" usa código ISO 4217 (ej. MXN, USD).` +
       ` "variants" lista las opciones (ej. Talla: M) y sus precios/SKU si aplican.` +
+      // (F8) La descripción va en MARKDOWN SIMPLE (el backend la convierte a HTML
+      // con `marked` para el Rich Content de Wix V3). Sin fences ni tablas.
+      ` "description" en MARKDOWN SIMPLE: párrafos, encabezados (# a ######),` +
+      ` listas (- o 1.), negritas (**texto**) y cursivas (*texto*).` +
+      ` SIN bloques de código ni fences (no uses triple backtick), SIN tablas (|)` +
+      ` ni bloques complejos (<pre>/<table>); máximo 5000 caracteres.` +
       ` Devuelve únicamente JSON válido con la forma del responseSchema.`,
   );
 
@@ -106,8 +112,13 @@ function mockAnalyze(imageUrls: string[], opts: AnalyzeOptions = {}): AnalyzeRes
     : 'Producto de ejemplo';
   const data: GeminiOutput = {
     name,
+    // (F8) Markdown simple (negrita + lista) para validar el flujo Markdown →
+    // marked → HTML → plainDescription (Rich Content) en modo demo.
     description:
-      'Producto capturado en modo demo (GEMINI_MOCK). Reemplaza esta descripción con la real antes de aprobar.',
+      '**Producto capturado en modo demo (GEMINI_MOCK).**\n\n' +
+      'Reemplaza esta descripción con la real antes de aprobar.\n\n' +
+      '- Material: 100% algodón\n' +
+      '- Color: disponible en varias opciones',
     price,
     currency,
     category: opts.sendCategory ? (opts.category ?? null) : null,
