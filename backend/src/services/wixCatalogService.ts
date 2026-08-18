@@ -51,6 +51,14 @@ export async function upsertProductV3(
     tag,
   });
 
+  // [DIAG-F7] Log temporal: ver qué `media` llega realmente al alta (hipótesis
+  // 1: shape viejo `mediaItems` vs. shape V3 `itemsInfo.items`).
+  const mediaSent = payload.product.media?.itemsInfo?.items ?? [];
+  console.log(
+    `[wix][DIAG] upsertProductV3(${product.sku}): mediaEnviada=${mediaSent.length} item(s)` +
+      (mediaSent[0]?.url ? ` url[0]=${mediaSent[0].url.slice(0, 100)}` : ''),
+  );
+
   let response: ProductWithInventoryResponse;
   try {
     response = await client.createProductWithInventory(payload);
@@ -78,6 +86,11 @@ export async function upsertProductV3(
   const createdItem = (response.inventoryResults?.results?.[0] as any)?.item;
   const inventoryQuantity =
     createdItem?.quantity != null ? Number(createdItem.quantity) : null;
+
+  console.log(
+    `[wix][DIAG] createProductWithInventory(${product.sku}) OK: id=${response.product.id} ` +
+      `revision=${response.product.revision ?? 'n/a'} mediaEnviada=${mediaSent.length}`,
+  );
 
   return {
     productId: response.product.id,

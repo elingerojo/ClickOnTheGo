@@ -141,6 +141,22 @@ async function processJob(jobId: string): Promise<void> {
 
     const result = await upsertProductV3(product, { quantity, visible, brandId });
 
+    // [DIAG-F7] Log temporal: read-back con MEDIA_ITEMS_INFO para confirmar
+    // cuántos ítems de media quedaron asociados (hipótesis 1/2).
+    if (result.productId) {
+      try {
+        const check = await client.readProductV3(result.productId, {
+          fields: ['MEDIA_ITEMS_INFO'],
+        });
+        const items = ((check as any)?.media?.itemsInfo?.items ?? []) as unknown[];
+        console.log(
+          `[worker][DIAG] read-back ${product.sku} (${result.productId}): mediaItems=${items.length}`,
+        );
+      } catch (checkErr: any) {
+        console.warn(`[worker][DIAG] read-back de media falló: ${checkErr?.message ?? checkErr}`);
+      }
+    }
+
     // 3) Éxito (creado o SKU ya existente → sin inventario nuevo)
     await pool.query(
       `UPDATE jobs SET state = 'success', attempts = attempts + 1, last_error = NULL, updated_at = now() WHERE id = $1`,

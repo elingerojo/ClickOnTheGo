@@ -148,9 +148,10 @@ export interface ProductWithInventoryBuildOptions {
  *  - `variantsInfo.variants[0].price.actualPrice` = `{ amount: string, currency }` (obligatorio).
  *  - `description` = OBJETO `{ text }` (un string da HTTP 400 "Expected an object").
  *  - `inventoryOptions.variants[0].choices` = ARRAY.
- *  - (F7) `media.mediaItems[{ url, title }]` se emite SI `product.imageUrls` trae
- *    URLs (el worker las reemplaza por URLs de Wix Media `wix:image://v1/...`
- *    ANTES del upsert). Shape confirmado por el spike F7 (Vía 1a).
+ *  - (F7) `media.itemsInfo.items[{ url, displayName, mediaType }]` se emite SI
+ *    `product.imageUrls` trae URLs (el worker las reemplaza por URLs de Wix Media
+ *    ANTES del upsert). Shape CONFIRMADO por el spike F7 real: `mediaItems` NO es
+ *    una clave válida (queda `media: {}`); la correcta es `itemsInfo.items`.
  */
 export function buildProductWithInventoryPayload(
   product: {
@@ -168,7 +169,7 @@ export function buildProductWithInventoryPayload(
   const currency = product.currency || 'USD';
   const mediaItems = (product.imageUrls ?? [])
     .filter((url) => url)
-    .map((url) => ({ url, title: product.name }));
+    .map((url) => ({ url, displayName: product.name, mediaType: 'IMAGE' as const }));
   return {
     product: {
       name: product.name,
@@ -200,7 +201,7 @@ export function buildProductWithInventoryPayload(
         ? { description: { text: product.description } }
         : {}),
       ...(include && mediaItems.length > 0
-        ? { media: { mediaItems } }
+        ? { media: { itemsInfo: { items: mediaItems } } }
         : {}),
       ...(include && product.jsonLd
         ? { seoData: { tags: [toSchemaTag(product.jsonLd)] } }

@@ -355,16 +355,18 @@ export interface ProductWithInventoryPayload {
     // endpoint los acepta sin costo. `description` es un OBJETO (validado en
     // F6a real: un string da HTTP 400 "Expected an object").
     description?: { text?: string; plainText?: string; richText?: string };
-    // (F7) Media propia de Wix Media (URLs `wix:image://v1/...`): el worker
-    // reemplaza las URLs del Blob por las de Wix Media antes del upsert.
-    // Shape confirmado por el spike F7 (Vía 1a): `mediaItems[{ url, title }]`;
-    // `image.url` se admite como variante de la idea V1 si el spike la confirma.
+    // (F7) Media propia de Wix Media: el worker reemplaza las URLs del Blob por
+    // las de Wix Media antes del upsert. Shape CONFIRMADO por el spike F7 real:
+    // `media.itemsInfo.items[]` (cada item con `url` externa + `displayName` +
+    // `mediaType`). `mediaItems` NO es una clave válida en Catalog V3.
     media?: {
-      mediaItems?: Array<{
-        url?: string;
-        title?: string;
-        image?: { url?: string };
-      }>;
+      itemsInfo?: {
+        items?: Array<{
+          url?: string;
+          displayName?: string;
+          mediaType?: 'IMAGE' | 'VIDEO' | string;
+        }>;
+      };
     };
     seoData?: { tags?: unknown[] };
   };
