@@ -44,6 +44,8 @@ export interface ProductCapture {
   price: number | null;
   currency: string;
   category: string | null;
+  /** GTIN (UPC/EAN) detectado por Gemini — opcional, solo si es un barcode válido. */
+  gtin?: string | null;
   /** Marca de Wix elegida/preseleccionada (nombre, resuelto a `brand: { id }` en el alta). */
   brand: string | null;
   variants: WixVariants | null;
@@ -65,6 +67,8 @@ export interface ProductDraftInput {
   category?: string | null;
   brand?: string | null;
   commercialId?: string | null;
+  /** GTIN (UPC/EAN) detectado por Gemini — opcional; solo se persiste si es válido. */
+  gtin?: string | null;
   imageUrls?: string[];
   variants?: WixVariants | null;
   jsonLd?: JsonLdProduct | null;
@@ -92,6 +96,9 @@ export interface GeminiProductResult {
   brand?: string | null;
   /** Identificador comercial detectado (UPC / ASIN / EAN...). */
   commercialId: string | null;
+  /** Código de barras GTIN (UPC-A/EAN-8/EAN-13/GTIN-14) si es legible en las
+   * fotos; null si no se ve claramente. OPCIONAL por diseño: nunca adivinar. */
+  gtin?: string | null;
   variants: GeminiVariant[];
   /** JSON-LD schema.org Product + Offer + inLanguage. */
   jsonLd: JsonLdProduct;
@@ -334,6 +341,12 @@ export interface ProductVariantPrice {
  * y el producto queda OUT_OF_STOCK. Campo `trackQuantity` (no `trackInventory`).
  */
 export interface ProductWithInventoryVariant {
+  // (F6b) El SKU y el barcode viven en la VARIANTE (VariantWithInventory del doc
+  // de products-with-inventory): "Variant SKU (stock keeping unit)" y barcode.
+  // Sin `sku` en la variante, Wix crea el producto con SKU vacío aunque
+  // `physicalProperties.sku` esté lleno.
+  sku?: string;
+  barcode?: string;
   choices?: Array<{ optionName?: string; value?: string }>;
   price: ProductVariantPrice;
   inventoryItem?: { trackQuantity: boolean; quantity: number };

@@ -124,6 +124,12 @@ function toWixVariants(variants: GeminiVariant[]): WixVariants | null {
             <p *ngIf="analysis.fieldErrors?.['commercialId']" class="text-xs text-red-600 mt-1">⚠️ {{ analysis.fieldErrors['commercialId'] }}</p>
           </div>
 
+          <div>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Código de barras (GTIN)</label>
+            <input formControlName="gtin" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <p class="text-xs text-slate-400 mt-1">Opcional. Gemini lo extrae solo si el barcode es legible; se valida (Luhn) y se envía a Wix como barcode. Vacío = no se envía.</p>
+          </div>
+
           <!-- Auto-approve -->
           <div class="flex items-center gap-3 bg-brand-50 rounded-xl p-4">
             <input type="checkbox" [checked]="autoApproved()" (change)="autoApproved.set($any($event.target).checked)"
@@ -181,6 +187,7 @@ export class ProductFormComponent implements OnInit {
       category: [analysis?.product.category ?? defaultCategory() ?? null],
       brand: [analysis?.product.brand ?? null],
       commercialId: [analysis?.product.commercialId ?? ''],
+      gtin: [analysis?.product.gtin ?? null],
     });
   }
 
@@ -197,6 +204,7 @@ export class ProductFormComponent implements OnInit {
     category: string | null;
     brand: string | null;
     commercialId: string | null;
+    gtin: string | null;
     imageUrls: string[];
     variants: WixVariants | null;
   } {
@@ -209,6 +217,7 @@ export class ProductFormComponent implements OnInit {
       category: v.category ?? null,
       brand: v.brand ?? null,
       commercialId: v.commercialId ? String(v.commercialId).trim() : null,
+      gtin: v.gtin ? String(v.gtin).trim() : null,
       imageUrls: this.imageUrls(),
       variants: toWixVariants(pendingAnalysis()?.product.variants ?? []),
     };

@@ -17,6 +17,7 @@ import type {
   WixVariants,
 } from '@click-on-the-go/shared';
 import { convertMarkdownToWixHtml, stripMarkdown } from './richContent.js';
+import { sanitizeGtin } from './skuService.js';
 
 /* ---------------------------------------------------------------------------
  * Zod (frontera A) — salida estructurada de Gemini
@@ -38,6 +39,9 @@ export const geminiProductSchema = z.object({
   /** Marca de Wix sugerida (debe ser uno de los nombres disponibles; null si no aplica). */
   brand: z.string().max(100).nullable().optional(),
   commercialId: z.string().max(60).nullable().optional(),
+  /** Código de barras GTIN (UPC-A/EAN-8/EAN-13/GTIN-14) si es legible en las
+   * fotos; null si no se ve claramente. OPCIONAL: no adivinar. */
+  gtin: z.string().max(20).nullable().optional(),
   variants: z.array(geminiVariantSchema).default([]),
 });
 
@@ -73,6 +77,7 @@ export function coerceGeminiOutput(data: any): GeminiOutput {
     category: typeof data?.category === 'string' ? data.category : null,
     brand: typeof data?.brand === 'string' ? data.brand : null,
     commercialId: typeof data?.commercialId === 'string' ? data.commercialId : null,
+    gtin: typeof data?.gtin === 'string' ? data.gtin : null,
     variants: Array.isArray(data?.variants) ? data.variants : [],
   };
 }
@@ -168,6 +173,8 @@ export function buildProductWithInventoryPayload(
     price?: number | null;
     currency?: string;
     sku: string;
+    /** GTIN (UPC/EAN) — opcional; solo se envía a Wix como `barcode` si es válido. */
+    gtin?: string | null;
     jsonLd?: JsonLdProduct | null;
     imageUrls?: string[];
   },
@@ -175,6 +182,9 @@ export function buildProductWithInventoryPayload(
 ): ProductWithInventoryPayload {
   const include = opts.includeDescriptionMediaSeo ?? true;
   const currency = product.currency || 'USD';
+  // (B4) GTIN opcional → `barcode` de la variante. Solo se incluye el campo si es
+  // un GTIN válido (longitud + Luhn mod-10); si es vacío/inválido NO se envía.
+  const barcode = sanitizeGtin(product.gtin);
   const mediaItems = (product.imageUrls ?? [])
     .filter((url) => url)
     .map((url) => ({ url, displayName: product.name, mediaType: 'IMAGE' as const }));
@@ -192,6 +202,12 @@ export function buildProductWithInventoryPayload(
       variantsInfo: {
         variants: [
           {
+            // (F6b) El SKU vive en la VARIANTE (variantsInfo.variants[].sku):
+            // el doc de products-with-inventory lo define como "Variant SKU
+            // (stock keeping unit)". Sin esto, Wix crea el producto con SKU
+            // vacío aunque `physicalProperties.sku` esté lleno.
+            sku: product.sku,
+            ...(barcode ? { barcode } : {}),
             choices: [],
             price: {
               actualPrice: {
@@ -269,6 +285,7 @@ export function toGeminiProductResult(
     category: data.category ?? null,
     brand: data.brand ?? null,
     commercialId: data.commercialId ?? null,
+    gtin: data.gtin ?? null,
     variants: data.variants ?? [],
     jsonLd,
   };

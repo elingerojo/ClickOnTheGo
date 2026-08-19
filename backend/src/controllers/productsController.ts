@@ -10,7 +10,7 @@ import { query, withTransaction } from '../config/db.js';
 import { sseBus } from '../config/sse.js';
 import { HttpError } from '../utils/httpError.js';
 import { rowToProduct } from '../services/mappers.js';
-import { buildSku } from '../services/skuService.js';
+import { buildSku, sanitizeGtin } from '../services/skuService.js';
 import { buildJsonLd, geminiVariantsToWix } from '../services/mapService.js';
 import { getSettings } from '../services/settingsService.js';
 import { loadJob } from '../services/jobsService.js';
@@ -24,6 +24,7 @@ const draftSchema = z.object({
   category: z.string().max(100).optional().nullable(),
   brand: z.string().max(100).optional().nullable(),
   commercialId: z.string().max(60).optional().nullable(),
+  gtin: z.string().max(20).optional().nullable(),
   imageUrls: z.array(z.string()).optional(),
   variants: z.any().optional(),
   jsonLd: z.any().optional(),
@@ -44,6 +45,9 @@ export async function create(req: Request, res: Response): Promise<void> {
   const settings = await getSettings();
 
   const sku = buildSku(body.commercialId, { prefix: settings.skuPrefix });
+  // (B) GTIN opcional: solo se persiste si es un barcode válido (longitud + Luhn).
+  // Un valor alucinado por Gemini (inválido/vacío) se descarta → null.
+  const gtin = sanitizeGtin(body.gtin);
   const jsonLd =
     body.jsonLd ??
     buildJsonLd(
@@ -65,8 +69,8 @@ export async function create(req: Request, res: Response): Promise<void> {
     Array.isArray(rawVariants) ? geminiVariantsToWix(rawVariants) : rawVariants;
 
   const { rows } = await query(
-    `INSERT INTO products (sku, name, description, price, currency, category, brand, variants, json_ld, image_urls, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft')
+    `INSERT INTO products (sku, name, description, price, currency, category, brand, gtin, variants, json_ld, image_urls, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'draft')
      RETURNING *`,
     [
       sku,
@@ -76,6 +80,7 @@ export async function create(req: Request, res: Response): Promise<void> {
       body.currency ?? settings.currency,
       body.category ?? null,
       body.brand ?? null,
+      gtin,
       JSON.stringify(wixVariants),
       JSON.stringify(jsonLd),
       // image_urls es text[]: pg serializa el arreglo a {} (JSON.stringify

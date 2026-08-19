@@ -88,6 +88,10 @@ function buildPrompt(opts: AnalyzeOptions = {}): string {
   parts.push(
     ` El campo "commercialId" debe ser el identificador comercial impreso en el producto` +
       ` (UPC, EAN, ASIN, número de modelo o de pieza) si es legible; si no, null.` +
+      ` El campo "gtin" debe ser el código de barras GTIN impreso en el producto` +
+      ` (UPC-A, EAN-8, EAN-13 o GTIN-14: SOLO dígitos) ÚNICAMENTE si es legible y nítido` +
+      ` en las fotos; si el código no se ve con claridad o no existe, pon null.` +
+      ` NUNCA inventes ni adivines un "gtin": es opcional y un valor falso rompe el barcode en Wix.` +
       ` "price" debe ser un número (usa el punto como decimal), o null si no es visible.` +
       ` "currency" usa código ISO 4217 (ej. MXN, USD).` +
       ` "variants" lista las opciones (ej. Talla: M) y sus precios/SKU si aplican.` +
