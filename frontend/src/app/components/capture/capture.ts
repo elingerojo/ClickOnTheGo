@@ -1,10 +1,11 @@
-import { Component, signal } from '@angular/core';
+import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { uploadImage } from '../../services/upload';
 import { analyzeImages } from '../../services/products';
-import { settings, defaultCategory, wixBrands, wixCategories } from '../../services/session';
+import { settings, defaultCategory, wixBrands, wixCategories, deviceToken } from '../../services/session';
+import { getDeviceToken, SessionMissingError } from '../../services/api';
 import { setPendingImages, setPendingAnalysis } from '../../services/capture-store';
 
 @Component({
@@ -86,7 +87,7 @@ import { setPendingImages, setPendingAnalysis } from '../../services/capture-sto
         <div class="flex items-center gap-3 flex-wrap">
           <button
             (click)="onAnalyze()"
-            [disabled]="files().length === 0 || analyzing()"
+            [disabled]="files().length === 0 || analyzing() || sessionMissing()"
             class="px-5 py-2.5 rounded-lg bg-brand-600 text-white font-medium hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {{ analyzing() ? 'Analizando con Gemini…' : '✨ Analizar producto' }}
@@ -99,15 +100,33 @@ import { setPendingImages, setPendingAnalysis } from '../../services/capture-sto
         </div>
 
         <p *ngIf="error()" class="text-sm text-red-600">{{ error() }}</p>
+
+        <!-- Sesión de dispositivo no disponible: CTA de reautenticación -->
+        <div *ngIf="sessionMissing()"
+             class="rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-2">
+          <p class="text-sm font-medium text-amber-800">
+            ⚠️ No hay una sesión de dispositivo válida para subir las fotos.
+          </p>
+          <p class="text-xs text-amber-700">
+            Si estás en modo privado o el almacenamiento no persiste, la sesión se pierde.
+            Vuelve a abrir la invitación para continuar.
+          </p>
+          <button (click)="goToAuth()"
+                  class="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700">
+            Reautenticar
+          </button>
+        </div>
       </div>
     </div>
   `,
 })
-export class CaptureComponent {
+export class CaptureComponent implements OnInit {
   files = signal<File[]>([]);
   previews = signal<string[]>([]);
   analyzing = signal(false);
   error = signal('');
+  /** Sin sesión de dispositivo válida: se muestra CTA de reautenticación. */
+  sessionMissing = signal(false);
   selectedCategory = signal<string | null>(defaultCategory());
   selectedBrand = signal<string | null>(null);
   settings = settings;
@@ -115,6 +134,16 @@ export class CaptureComponent {
   wixBrands = wixBrands;
 
   constructor(private readonly router: Router) {}
+
+  ngOnInit(): void {
+    // Pre-chequeo defensivo: si no hay sesión al entrar a Captura, mostrar el CTA
+    // en lugar de fallar hasta el momento de subir.
+    this.sessionMissing.set(!getDeviceToken() && !deviceToken());
+  }
+
+  goToAuth(): void {
+    void this.router.navigate(['/auth']);
+  }
 
   onFilesSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -168,7 +197,14 @@ export class CaptureComponent {
       setPendingAnalysis(result);
       await this.router.navigate(['/producto']);
     } catch (err) {
-      this.error.set(err instanceof Error ? err.message : 'Error al analizar las fotos');
+      if (err instanceof SessionMissingError) {
+        // Sin sesión de dispositivo: mensaje claro + CTA (en vez del error de Vercel Blob).
+        this.sessionMissing.set(true);
+        this.error.set('No hay una sesión de dispositivo válida para subir las fotos.');
+      } else {
+        this.sessionMissing.set(false);
+        this.error.set(err instanceof Error ? err.message : 'Error al analizar las fotos');
+      }
     } finally {
       this.analyzing.set(false);
     }

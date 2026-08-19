@@ -142,6 +142,11 @@ export function setCurrentDeviceId(id: string): void {
 }
 
 export function clearSession(): void {
+  // [DEBUG] Diagnóstico persistencia iOS (quitar antes del release): quién llama a clearSession.
+  console.warn('[DEBUG auth] clearSession() llamado', {
+    deviceTokenAntes: Boolean(deviceToken()),
+    stack: new Error().stack?.split('\n').slice(1, 4).join(' | '),
+  });
   deviceToken.set(null);
   setDeviceToken(null);
   deviceId.set(null);

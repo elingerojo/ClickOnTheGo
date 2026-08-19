@@ -46,7 +46,7 @@ export async function requireDevice(
     url: req.originalUrl,
   });
   if (!token) {
-    res.status(401).json({ error: 'Falta X-Device-Token' });
+    res.status(401).json({ error: 'Falta X-Device-Token', code: 'MISSING_DEVICE_TOKEN' });
     return;
   }
   try {
@@ -55,7 +55,7 @@ export async function requireDevice(
       [hashToken(token)],
     );
     if (rows.length === 0) {
-      res.status(401).json({ error: 'Dispositivo no válido o revocado' });
+      res.status(401).json({ error: 'Dispositivo no válido o revocado', code: 'INVALID_DEVICE_TOKEN' });
       return;
     }
     req.device = { id: rows[0].id, name: rows[0].name };
