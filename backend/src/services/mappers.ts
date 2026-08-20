@@ -17,7 +17,7 @@ export const JOB_PRODUCT_SELECT = `
     j.updated_at AS job_updated_at,
     p.id,
     p.sku,
-    p.gtin,
+    p.barcode,
     p.name,
     p.description,
     p.price,
@@ -45,7 +45,7 @@ export function rowToProduct(row: any): ProductCapture {
   return {
     id: row.id,
     sku: row.sku,
-    gtin: row.gtin ?? null,
+    barcode: row.barcode ?? null,
     name: row.name,
     description: row.description ?? null,
     price: row.price != null ? Number(row.price) : null,

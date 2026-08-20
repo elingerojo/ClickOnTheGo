@@ -86,12 +86,14 @@ function buildPrompt(opts: AnalyzeOptions = {}): string {
   }
 
   parts.push(
-    ` El campo "commercialId" debe ser el identificador comercial impreso en el producto` +
-      ` (UPC, EAN, ASIN, número de modelo o de pieza) si es legible; si no, null.` +
-      ` El campo "gtin" debe ser el código de barras GTIN impreso en el producto` +
-      ` (UPC-A, EAN-8, EAN-13 o GTIN-14: SOLO dígitos) ÚNICAMENTE si es legible y nítido` +
+    ` El campo "barcode" debe ser UN SOLO código de barras del producto con esta prioridad:` +
+      ` 1) GTIN (EAN-8/EAN-13/GTIN-14, SOLO dígitos), 2) UPC (UPC-A, 12 dígitos),` +
+      ` 3) ASIN (10 alfanuméricos que empiezan por 'B') — SOLO si es legible y nítido` +
       ` en las fotos; si el código no se ve con claridad o no existe, pon null.` +
-      ` NUNCA inventes ni adivines un "gtin": es opcional y un valor falso rompe el barcode en Wix.` +
+      ` NUNCA inventes ni adivines un "barcode": es opcional y un valor falso rompe el barcode en Wix.` +
+      ` El campo "skuSuggestion" debe ser UN BUEN SKU con el modelo o identificador popular` +
+      ` del producto dentro de su marca o categoría (ej. "XPS-13", "AirMax-90", "GalaxyS24");` +
+      ` se usará como base para el SKU final "SKU-{valor}" en Wix; si no puedes deducirlo, pon null.` +
       ` "price" debe ser un número (usa el punto como decimal), o null si no es visible.` +
       ` "currency" usa código ISO 4217 (ej. MXN, USD).` +
       ` "variants" lista las opciones (ej. Talla: M) y sus precios/SKU si aplican.` +
@@ -127,13 +129,14 @@ function mockAnalyze(imageUrls: string[], opts: AnalyzeOptions = {}): AnalyzeRes
     currency,
     category: opts.sendCategory ? (opts.category ?? null) : null,
     brand: opts.sendBrand ? (opts.brand ?? null) : null,
-    commercialId: null,
+    barcode: null,
+    skuSuggestion: 'DEMO-001',
     variants: [
       { name: 'Talla', value: 'M', price },
       { name: 'Talla', value: 'L', price: price + 50 },
     ],
   };
-  const sku = buildSku(data.commercialId);
+  const sku = buildSku(data.skuSuggestion, data.barcode);
   const site = { currency, language: 'es-ES' };
   const jsonLd = buildJsonLd(data, { sku, currency: site.currency, language: site.language });
   return { product: toGeminiProductResult(data, jsonLd) };
@@ -189,7 +192,7 @@ export async function analyzeProduct(
 
   // Moneda e idioma dinámicos del sitio (site-properties v4 / mock)
   const site = await getWixClient().getSiteProperties();
-  const sku = buildSku(data.commercialId);
+  const sku = buildSku(data.skuSuggestion, data.barcode);
   const jsonLd = buildJsonLd(data, {
     sku,
     currency: site.currency,

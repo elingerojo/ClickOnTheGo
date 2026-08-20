@@ -38,10 +38,10 @@ export const geminiProductSchema = z.object({
   category: z.string().max(100).nullable().optional(),
   /** Marca de Wix sugerida (debe ser uno de los nombres disponibles; null si no aplica). */
   brand: z.string().max(100).nullable().optional(),
-  commercialId: z.string().max(60).nullable().optional(),
-  /** Código de barras GTIN (UPC-A/EAN-8/EAN-13/GTIN-14) si es legible en las
-   * fotos; null si no se ve claramente. OPCIONAL: no adivinar. */
-  gtin: z.string().max(20).nullable().optional(),
+  /** Código de barras ÚNICO con prioridad GTIN > UPC > ASIN; null si no es legible. */
+  barcode: z.string().max(60).nullable().optional(),
+  /** SKU sugerido: modelo o identificador popular del producto en su marca/categoría. */
+  skuSuggestion: z.string().max(40).nullable().optional(),
   variants: z.array(geminiVariantSchema).default([]),
 });
 
@@ -76,8 +76,8 @@ export function coerceGeminiOutput(data: any): GeminiOutput {
     currency: typeof data?.currency === 'string' ? data.currency : 'USD',
     category: typeof data?.category === 'string' ? data.category : null,
     brand: typeof data?.brand === 'string' ? data.brand : null,
-    commercialId: typeof data?.commercialId === 'string' ? data.commercialId : null,
-    gtin: typeof data?.gtin === 'string' ? data.gtin : null,
+    barcode: typeof data?.barcode === 'string' ? data.barcode : null,
+    skuSuggestion: typeof data?.skuSuggestion === 'string' ? data.skuSuggestion : null,
     variants: Array.isArray(data?.variants) ? data.variants : [],
   };
 }
@@ -92,13 +92,17 @@ export interface JsonLdInput {
   price?: number | null;
   currency?: string;
   category?: string | null;
-  commercialId?: string | null;
+  /** Fuente para `mpn`: SKU sugerido por Gemini (modelo/identificador popular). */
+  skuSuggestion?: string | null;
+  /** Respaldo para `mpn` si no hay `skuSuggestion`. */
+  barcode?: string | null;
 }
 
 export function buildJsonLd(
   input: JsonLdInput,
   opts: { sku: string; currency: string; language: string },
 ): JsonLdProduct {
+  const mpn = input.skuSuggestion?.trim() || input.barcode?.trim() || undefined;
   const jsonLd: JsonLdProduct = {
     '@context': 'https://schema.org',
     '@type': 'Product',
@@ -107,7 +111,7 @@ export function buildJsonLd(
     // TEXTO PLANO (stripMarkdown) para `seoData.tags`.
     ...(input.description ? { description: stripMarkdown(input.description) } : {}),
     sku: opts.sku,
-    ...(input.commercialId ? { mpn: input.commercialId } : {}),
+    ...(mpn ? { mpn } : {}),
     ...(input.category ? { category: input.category } : {}),
     inLanguage: opts.language,
     offers: {
@@ -173,8 +177,8 @@ export function buildProductWithInventoryPayload(
     price?: number | null;
     currency?: string;
     sku: string;
-    /** GTIN (UPC/EAN) — opcional; solo se envía a Wix como `barcode` si es válido. */
-    gtin?: string | null;
+    /** Código de barras (GTIN/UPC/ASIN) — opcional; a Wix solo se envía si es un GTIN válido. */
+    barcode?: string | null;
     jsonLd?: JsonLdProduct | null;
     imageUrls?: string[];
   },
@@ -182,9 +186,10 @@ export function buildProductWithInventoryPayload(
 ): ProductWithInventoryPayload {
   const include = opts.includeDescriptionMediaSeo ?? true;
   const currency = product.currency || 'USD';
-  // (B4) GTIN opcional → `barcode` de la variante. Solo se incluye el campo si es
-  // un GTIN válido (longitud + Luhn mod-10); si es vacío/inválido NO se envía.
-  const barcode = sanitizeGtin(product.gtin);
+  // (B4) Código de barras → `barcode` de la variante. Solo se incluye el campo si
+  // es un GTIN válido (longitud + Luhn mod-10); si es vacío/inválido NO se envía
+  // (un ASIN u otro código no es un barcode válido para Wix).
+  const barcode = sanitizeGtin(product.barcode);
   const mediaItems = (product.imageUrls ?? [])
     .filter((url) => url)
     .map((url) => ({ url, displayName: product.name, mediaType: 'IMAGE' as const }));
@@ -284,8 +289,8 @@ export function toGeminiProductResult(
     currency: data.currency || 'USD',
     category: data.category ?? null,
     brand: data.brand ?? null,
-    commercialId: data.commercialId ?? null,
-    gtin: data.gtin ?? null,
+    barcode: data.barcode ?? null,
+    skuSuggestion: data.skuSuggestion ?? null,
     variants: data.variants ?? [],
     jsonLd,
   };

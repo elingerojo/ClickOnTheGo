@@ -31,8 +31,20 @@ CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
 -- Marca de Wix elegida para el alta (nombre; se resuelve a `brand: { id }` vía `brands`).
 ALTER TABLE products ADD COLUMN IF NOT EXISTS brand text;
 
--- GTIN (UPC/EAN) detectado por Gemini — opcional; solo se persiste si es un barcode válido.
-ALTER TABLE products ADD COLUMN IF NOT EXISTS gtin text;
+-- Código de barras del producto (GTIN/UPC o, en último caso, ASIN) — opcional.
+-- Migración idempotente: la columna previa `gtin` se renombra a `barcode`
+-- conservando los datos; en una base nueva simplemente se crea `barcode`.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'products' AND column_name = 'gtin'
+  ) THEN
+    ALTER TABLE products RENAME COLUMN gtin TO barcode;
+  ELSE
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode text;
+  END IF;
+END $$;
 
 -- Catálogo de categorías de Wix sincronizado (Wix → Neon) para el frontend.
 CREATE TABLE IF NOT EXISTS categories (

@@ -49,6 +49,21 @@ function toWixVariants(variants: GeminiVariant[]): WixVariants | null {
   };
 }
 
+/** Normaliza la base de un SKU (misma regla que el backend `sanitizeId`). */
+function sanitizeSkuBase(raw: string | null | undefined): string {
+  return (raw ?? '').replace(/[^A-Za-z0-9-]/g, '').toUpperCase().slice(0, 40);
+}
+
+/** Vista previa del SKU generado: `prefijo` + sugerencia de Gemini (o barcode). */
+function buildSkuPreview(
+  skuSuggestion: string | null | undefined,
+  barcode: string | null | undefined,
+  prefix: string,
+): string {
+  const base = sanitizeSkuBase(skuSuggestion) || sanitizeSkuBase(barcode);
+  return base ? `${prefix}${base}` : '';
+}
+
 @Component({
   selector: 'app-product-form',
   standalone: true,
@@ -119,15 +134,16 @@ function toWixVariants(variants: GeminiVariant[]): WixVariants | null {
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Identificador (UPC/ASIN)</label>
-            <input formControlName="commercialId" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
-            <p *ngIf="analysis.fieldErrors?.['commercialId']" class="text-xs text-red-600 mt-1">⚠️ {{ analysis.fieldErrors['commercialId'] }}</p>
+            <label class="block text-sm font-medium text-slate-600 mb-1">Código de barras</label>
+            <input formControlName="barcode" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <p class="text-xs text-slate-400 mt-1">Prioridad GTIN > UPC > ASIN (detectado por Gemini). Solo un GTIN válido se envía a Wix como barcode.</p>
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-slate-600 mb-1">Código de barras (GTIN)</label>
-            <input formControlName="gtin" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
-            <p class="text-xs text-slate-400 mt-1">Opcional. Gemini lo extrae solo si el barcode es legible; se valida (Luhn) y se envía a Wix como barcode. Vacío = no se envía.</p>
+            <label class="block text-sm font-medium text-slate-600 mb-1">SKU</label>
+            <input formControlName="sku" class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+            <p *ngIf="analysis.fieldErrors?.['sku']" class="text-xs text-red-600 mt-1">⚠️ {{ analysis.fieldErrors['sku'] }}</p>
+            <p class="text-xs text-slate-400 mt-1">Generado como SKU- + sugerencia de Gemini (o el código de barras si no hay sugerencia). Editable; vacío = se autogenera.</p>
           </div>
 
           <!-- Auto-approve -->
@@ -170,6 +186,8 @@ export class ProductFormComponent implements OnInit {
   wixBrands = wixBrands;
   saving = signal(false);
   error = signal('');
+  /** Sugerencia de SKU de Gemini (modelo/identificador popular); no es un campo editable. */
+  private skuSuggestion: string | null = null;
 
   constructor(
     private readonly fb: FormBuilder,
@@ -179,6 +197,9 @@ export class ProductFormComponent implements OnInit {
   ngOnInit(): void {
     const analysis = pendingAnalysis();
     const defaults = settings() ?? null;
+    const prefix = defaults?.skuPrefix ?? 'SKU-';
+    this.skuSuggestion = analysis?.product.skuSuggestion ?? null;
+    const initialBarcode = analysis?.product.barcode ?? null;
     this.form = this.fb.group({
       name: [analysis?.product.name ?? '', Validators.required],
       description: [analysis?.product.description ?? ''],
@@ -186,8 +207,16 @@ export class ProductFormComponent implements OnInit {
       currency: [analysis?.product.currency ?? defaults?.currency ?? 'USD'],
       category: [analysis?.product.category ?? defaultCategory() ?? null],
       brand: [analysis?.product.brand ?? null],
-      commercialId: [analysis?.product.commercialId ?? ''],
-      gtin: [analysis?.product.gtin ?? null],
+      barcode: [initialBarcode ?? ''],
+      sku: [buildSkuPreview(this.skuSuggestion, initialBarcode, prefix)],
+    });
+    // SKU en vivo: se regenera al editar el barcode SOLO si el usuario no lo ha
+    // tocado manualmente (skuControl.dirty); si ya lo editó, se respeta su valor.
+    this.form.controls['barcode'].valueChanges.subscribe((value: string) => {
+      const skuControl = this.form.controls['sku'];
+      if (!skuControl.dirty) {
+        skuControl.setValue(buildSkuPreview(this.skuSuggestion, value, prefix), { emitEvent: false });
+      }
     });
   }
 
@@ -203,8 +232,9 @@ export class ProductFormComponent implements OnInit {
     currency: string;
     category: string | null;
     brand: string | null;
-    commercialId: string | null;
-    gtin: string | null;
+    barcode: string | null;
+    skuSuggestion: string | null;
+    sku: string | null;
     imageUrls: string[];
     variants: WixVariants | null;
   } {
@@ -216,8 +246,9 @@ export class ProductFormComponent implements OnInit {
       currency: (v.currency || 'USD').toUpperCase(),
       category: v.category ?? null,
       brand: v.brand ?? null,
-      commercialId: v.commercialId ? String(v.commercialId).trim() : null,
-      gtin: v.gtin ? String(v.gtin).trim() : null,
+      barcode: v.barcode ? String(v.barcode).trim() : null,
+      skuSuggestion: this.skuSuggestion,
+      sku: v.sku ? String(v.sku).trim() : null,
       imageUrls: this.imageUrls(),
       variants: toWixVariants(pendingAnalysis()?.product.variants ?? []),
     };

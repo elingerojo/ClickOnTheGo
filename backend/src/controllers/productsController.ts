@@ -10,7 +10,7 @@ import { query, withTransaction } from '../config/db.js';
 import { sseBus } from '../config/sse.js';
 import { HttpError } from '../utils/httpError.js';
 import { rowToProduct } from '../services/mappers.js';
-import { buildSku, sanitizeGtin } from '../services/skuService.js';
+import { buildSku, sanitizeBarcode, sanitizeId } from '../services/skuService.js';
 import { buildJsonLd, geminiVariantsToWix } from '../services/mapService.js';
 import { getSettings } from '../services/settingsService.js';
 import { loadJob } from '../services/jobsService.js';
@@ -23,8 +23,9 @@ const draftSchema = z.object({
   currency: z.string().max(8).optional(),
   category: z.string().max(100).optional().nullable(),
   brand: z.string().max(100).optional().nullable(),
-  commercialId: z.string().max(60).optional().nullable(),
-  gtin: z.string().max(20).optional().nullable(),
+  barcode: z.string().max(60).optional().nullable(),
+  skuSuggestion: z.string().max(40).optional().nullable(),
+  sku: z.string().max(40).optional().nullable(),
   imageUrls: z.array(z.string()).optional(),
   variants: z.any().optional(),
   jsonLd: z.any().optional(),
@@ -44,10 +45,16 @@ export async function create(req: Request, res: Response): Promise<void> {
   const body = parsed.data;
   const settings = await getSettings();
 
-  const sku = buildSku(body.commercialId, { prefix: settings.skuPrefix });
-  // (B) GTIN opcional: solo se persiste si es un barcode válido (longitud + Luhn).
-  // Un valor alucinado por Gemini (inválido/vacío) se descarta → null.
-  const gtin = sanitizeGtin(body.gtin);
+  // (C) SKU final: el usuario puede enviar uno explícito (editable en el
+  // formulario); si viene vacío se genera `SKU-` + sugerencia de Gemini, con el
+  // barcode como respaldo y, en última instancia, un código aleatorio.
+  const submittedSku = body.sku?.trim() ?? '';
+  const sku = submittedSku
+    ? sanitizeId(submittedSku)
+    : buildSku(body.skuSuggestion, body.barcode, { prefix: settings.skuPrefix });
+  // (B) Código de barras ÚNICO: se resuelve con prioridad GTIN > UPC > ASIN.
+  // Un valor alucinado (inválido/vacío) se descarta → null.
+  const barcode = sanitizeBarcode(body.barcode);
   const jsonLd =
     body.jsonLd ??
     buildJsonLd(
@@ -57,7 +64,8 @@ export async function create(req: Request, res: Response): Promise<void> {
         price: body.price ?? null,
         currency: body.currency ?? settings.currency,
         category: body.category ?? null,
-        commercialId: body.commercialId ?? null,
+        skuSuggestion: body.skuSuggestion ?? null,
+        barcode: body.barcode ?? null,
       },
       { sku, currency: settings.currency, language: settings.language },
     );
@@ -68,26 +76,39 @@ export async function create(req: Request, res: Response): Promise<void> {
   const wixVariants =
     Array.isArray(rawVariants) ? geminiVariantsToWix(rawVariants) : rawVariants;
 
-  const { rows } = await query(
-    `INSERT INTO products (sku, name, description, price, currency, category, brand, gtin, variants, json_ld, image_urls, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'draft')
-     RETURNING *`,
-    [
-      sku,
-      body.name,
-      body.description ?? null,
-      body.price ?? null,
-      body.currency ?? settings.currency,
-      body.category ?? null,
-      body.brand ?? null,
-      gtin,
-      JSON.stringify(wixVariants),
-      JSON.stringify(jsonLd),
-      // image_urls es text[]: pg serializa el arreglo a {} (JSON.stringify
-      // produciría un string inválido → "malformed array literal").
-      body.imageUrls ?? [],
-    ],
-  );
+  let rows: any[];
+  try {
+    ({ rows } = await query(
+      `INSERT INTO products (sku, name, description, price, currency, category, brand, barcode, variants, json_ld, image_urls, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'draft')
+       RETURNING *`,
+      [
+        sku,
+        body.name,
+        body.description ?? null,
+        body.price ?? null,
+        body.currency ?? settings.currency,
+        body.category ?? null,
+        body.brand ?? null,
+        barcode,
+        JSON.stringify(wixVariants),
+        JSON.stringify(jsonLd),
+        // image_urls es text[]: pg serializa el arreglo a {} (JSON.stringify
+        // produciría un string inválido → "malformed array literal").
+        body.imageUrls ?? [],
+      ],
+    ));
+  } catch (err: any) {
+    // SKU duplicado (UNIQUE products_sku_key) → error amigable para el formulario.
+    if (err?.code === '23505' && err?.constraint === 'products_sku_key') {
+      res.status(400).json({
+        error: 'Ya existe un producto con ese SKU.',
+        fieldErrors: { sku: 'El SKU ya existe; cámbialo o déjalo vacío para autogenerarlo.' },
+      });
+      return;
+    }
+    throw err;
+  }
 
   const product = rowToProduct(rows[0]);
   await audit('product:created', { productId: product.id, sku, name: product.name });

@@ -44,8 +44,8 @@ export interface ProductCapture {
   price: number | null;
   currency: string;
   category: string | null;
-  /** GTIN (UPC/EAN) detectado por Gemini — opcional, solo si es un barcode válido. */
-  gtin?: string | null;
+  /** Código de barras asignado al producto (GTIN/UPC o, en último caso, ASIN) — opcional. */
+  barcode?: string | null;
   /** Marca de Wix elegida/preseleccionada (nombre, resuelto a `brand: { id }` en el alta). */
   brand: string | null;
   variants: WixVariants | null;
@@ -66,9 +66,12 @@ export interface ProductDraftInput {
   currency?: string;
   category?: string | null;
   brand?: string | null;
-  commercialId?: string | null;
-  /** GTIN (UPC/EAN) detectado por Gemini — opcional; solo se persiste si es válido. */
-  gtin?: string | null;
+  /** Código de barras asignado al producto (prioridad GTIN > UPC > ASIN). */
+  barcode?: string | null;
+  /** SKU sugerido por Gemini (modelo o identificador popular); base para `SKU-`. */
+  skuSuggestion?: string | null;
+  /** SKU final (editable por el usuario); si viene vacío el backend lo genera. */
+  sku?: string | null;
   imageUrls?: string[];
   variants?: WixVariants | null;
   jsonLd?: JsonLdProduct | null;
@@ -94,11 +97,10 @@ export interface GeminiProductResult {
   category: string | null;
   /** Marca de Wix sugerida por Gemini (nombre de la lista disponible; null si no aplica). */
   brand?: string | null;
-  /** Identificador comercial detectado (UPC / ASIN / EAN...). */
-  commercialId: string | null;
-  /** Código de barras GTIN (UPC-A/EAN-8/EAN-13/GTIN-14) si es legible en las
-   * fotos; null si no se ve claramente. OPCIONAL por diseño: nunca adivinar. */
-  gtin?: string | null;
+  /** Código de barras único del producto con prioridad GTIN > UPC > ASIN. */
+  barcode: string | null;
+  /** SKU sugerido por Gemini: modelo o identificador popular del producto en su marca/categoría. */
+  skuSuggestion?: string | null;
   variants: GeminiVariant[];
   /** JSON-LD schema.org Product + Offer + inLanguage. */
   jsonLd: JsonLdProduct;

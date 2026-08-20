@@ -1,9 +1,11 @@
 /**
  * Servicio de SKU — independiente y configurable.
  *
- * - Entrada: identificador comercial detectado por Gemini (UPC/ASIN/EAN).
- * - Salida: concatenación configurable, por defecto `SKU-` + identificador.
- * - Si no hay identificador, cae a una regla de respaldo configurable
+ * - Entrada primaria: `skuSuggestion` de Gemini (modelo o identificador popular
+ *   del producto dentro de su marca/categoría).
+ * - Entrada de respaldo: el código de barras del producto (`barcode`).
+ * - Salida: concatenación configurable, por defecto `SKU-` + valor.
+ * - Si no hay ningún valor, cae a una regla de respaldo configurable
  *   ('code' = código aleatorio, 'uuid' = fragmento de UUID).
  * El prefijo se toma de `SKU_PREFIX` (env) o de `settings.skuPrefix`.
  *
@@ -14,6 +16,11 @@
  * GTIN (UPC-A=12, EAN-13=13, EAN-8=8, GTIN-14=14) con checksum Luhn mod-10.
  * Gemini puede alucinar un GTIN; aquí se descarta cualquier valor inválido y
  * el barcode en Wix se trata como OPCIONAL (nunca se fuerza un dato falso).
+ *
+ * (C2) `sanitizeBarcode` resuelve el código de barras ÚNICO del producto con
+ * prioridad GTIN > UPC > ASIN: si hay un GTIN válido (longitud + Luhn) se usan
+ * los dígitos (UPC-A = GTIN-12); si no, un ASIN (10 alfanuméricos, empieza por
+ * 'B') como último caso; cualquier otro valor se descarta.
  */
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
@@ -45,16 +52,25 @@ export interface SkuBuildOptions {
   fallback?: 'code' | 'uuid';
 }
 
+/**
+ * Construye el SKU del producto.
+ *
+ * - `primary`: sugerencia de Gemini (modelo/identificador popular) — se usa
+ *   primero.
+ * - `fallback`: código de barras del producto — se usa si `primary` está vacío.
+ * - Si ambos están vacíos, cae a una regla de respaldo (código aleatorio o UUID).
+ */
 export function buildSku(
-  commercialId: string | null | undefined,
+  primary: string | null | undefined,
+  fallback: string | null | undefined,
   options?: SkuBuildOptions,
 ): string {
   const prefix = options?.prefix ?? env.skuPrefix;
-  const clean = sanitizeId(commercialId);
+  const clean = sanitizeId(primary) || sanitizeId(fallback);
   if (clean) return `${prefix}${clean}`.slice(0, MAX_SKU_LENGTH);
-  const fallback = options?.fallback ?? 'code';
+  const rule = options?.fallback ?? 'code';
   const code =
-    fallback === 'uuid'
+    rule === 'uuid'
       ? randomUUID().replace(/-/g, '').toUpperCase().slice(0, 8)
       : randomCode(8);
   return `${prefix}${code}`.slice(0, MAX_SKU_LENGTH);
@@ -91,4 +107,24 @@ export function sanitizeGtin(raw: string | null | undefined): string | null {
   const digits = raw.replace(/\D/g, '');
   if (!GTIN_LENGTHS.has(digits.length)) return null;
   return luhnCheck(digits) ? digits : null;
+}
+
+/**
+ * Resuelve el código de barras ÚNICO del producto con prioridad GTIN > UPC > ASIN.
+ * - GTIN/UPC: dígitos con longitud válida (8/12/13/14) y checksum Luhn → dígitos
+ *   (UPC-A es un GTIN-12, así que cubre tanto GTIN como UPC).
+ * - ASIN: último caso, solo si no hay GTIN válido (10 alfanuméricos que empiezan
+ *   por 'B', formato de Amazon).
+ * - Cualquier otro valor se descarta → null.
+ *
+ * NOTA: el valor resuelto es el barcode asignado al producto (se persiste); a
+ * Wix solo se envía como `barcode` si es un GTIN válido (ver `sanitizeGtin`).
+ */
+export function sanitizeBarcode(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (GTIN_LENGTHS.has(digits.length) && luhnCheck(digits)) return digits;
+  const trimmed = raw.trim().toUpperCase();
+  if (/^B[A-Z0-9]{9}$/.test(trimmed)) return trimmed;
+  return null;
 }
