@@ -64,11 +64,6 @@ export const env = {
     return process.env.BACKEND_PUBLIC_URL ?? `http://localhost:${this.port}`;
   },
 
-  /** Usa el adaptador mock de Wix cuando faltan credenciales reales (PoC). */
-  get wixMock(): boolean {
-    return !this.wixApiKey || !this.wixSiteId;
-  },
-
   /** Configuración del pool `pg`. Soporta DATABASE_URL o variables individuales. */
   get poolConfig(): PoolConfig {
     if (process.env.DATABASE_URL) {
@@ -94,12 +89,14 @@ export const env = {
   },
 };
 
-/** Lanza un error claro si faltan variables obligatorias (excepto Wix que cae a mock). */
+/** Lanza un error claro si faltan variables obligatorias (incluidas las de Wix). */
 export function assertRequiredEnv(): void {
   const missing: string[] = [];
   if (!env.geminiApiKey) missing.push('GEMINI_API_KEY');
   if (!env.blobReadWriteToken) missing.push('BLOB_READ_WRITE_TOKEN');
   if (!env.adminToken) missing.push('ADMIN_TOKEN');
+  if (!env.wixApiKey) missing.push('WIX_API_KEY');
+  if (!env.wixSiteId) missing.push('WIX_SITE_ID');
   if (!process.env.DATABASE_URL && !process.env.DATABASE_HOST) {
     missing.push('DATABASE_URL (o DATABASE_HOST + DATABASE_USERNAME + ...)');
   }

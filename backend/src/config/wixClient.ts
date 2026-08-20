@@ -1,16 +1,14 @@
 /**
- * Cliente de Wix Catalog V3 con ADAPTADOR MOCK para la PoC.
+ * Cliente de Wix Catalog V3 (MVP) — integración real sin adaptador mock.
  *
- * Misma interfaz que el SDK real (`@wix/stores-catalog` + `@wix/sdk`):
  *   - stores/v3/products-with-inventory (alta con inventario, create-only)
  *   - site-properties/v4/properties (moneda e idioma dinámicos)
  *   - wix-media-backend (copia de imágenes)
- *   - Stores Catalog V3 (lectura de productos/categorías, F0/F3)
+ *   - Stores Catalog V3 (categorías, F3)
  *
- * Si faltan `WIX_API_KEY` / `WIX_SITE_ID` (env), se usa el mock
- * (in-memory) para validar el flujo punta a punta sin credenciales reales.
+ * Requiere `WIX_API_KEY` y `WIX_SITE_ID` (env). Si faltan, `getWixClient()`
+ * lanza un error claro en el arranque (no hay fallback a mock).
  */
-import { randomUUID } from 'node:crypto';
 import { createClient, ApiKeyStrategy } from '@wix/sdk';
 import { productsV3 } from '@wix/stores';
 import * as categories from '@wix/auto_sdk_categories_categories';
@@ -21,48 +19,25 @@ import type {
   ProductWithInventoryResponse,
   WixBrand,
   WixCategory,
-  WixCatalogProduct,
-  WixProductEntity,
   WixSiteProperties,
 } from '@click-on-the-go/shared';
 
 export interface WixCatalogClient {
-  readonly mode: 'mock' | 'real';
+  readonly mode: 'real';
   /** Moneda e idioma del sitio (site-properties v4). */
   getSiteProperties(): Promise<WixSiteProperties>;
   /**
    * Importa una imagen desde Blob staging a Wix Media (Media Manager) por URL
    * (`files.importFile` de `@wix/media`; copia Blob→Wix server-side, sin byte
    * streaming) y devuelve la URL canónica `wix:image://v1/...` que esperan las
-   * APIs de catálogo/tiendas. En el mock devuelve una URL simulada.
+   * APIs de catálogo/tiendas.
    * POLÍTICA DE ERROR (F7, confirmada): LANZA si la subida falla — no hay
    * fallback a la URL del Blob; el error propaga y el worker reintenta/falla
    * el job (el log queda como rastro forense).
    */
   uploadImageToMedia(blobUrl: string, title?: string): Promise<string>;
-  /**
-   * (F3/F0) Lee un producto de Stores Catalog V3 por ID. Incluye
-   * `allCategoriesInfo` / `directCategoriesInfo` / `mainCategoryId`.
-   * (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum
-   * `RequestedFields`, p. ej. `ALL_CATEGORIES_INFO` / `DIRECT_CATEGORIES_INFO` /
-   * `DESCRIPTION` / `DISCOUNT_INFO`); los campos regulares siempre se devuelven.
-   */
-  readProductV3(id: string, opts?: { fields?: string[] }): Promise<WixCatalogProduct | null>;
-  /**
-   * (F3/F0) Lista productos de Stores Catalog V3 (paginado por cursor).
-   * Devuelve la primera página y si hay más (`hasMore`).
-   * (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum
-   * `RequestedFields`) en la lista.
-   */
-  queryProductsV3(opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }>;
-  /** (F3/F0) Lista las categorías del catálogo del sitio (wix.categories.v1.category). */
+  /** (F3) Lista las categorías del catálogo del sitio (wix.categories.v1.category). */
   queryCategories(): Promise<WixCategory[]>;
-  /**
-   * (F0b) Lee una categoría por ID (wix.categories.v1.category).
-   * `opts.fields` incluye campos OPCIONALES adicionales (enum de categorías:
-   * `DESCRIPTION` / `RICH_CONTENT_DESCRIPTION` / `BREADCRUMBS_INFO`).
-   */
-  readCategoryV3(id: string, opts?: { fields?: string[] }): Promise<WixCategory | null>;
   /** (F6) Alta de producto CON inventario inicial (stores/v3/products-with-inventory). */
   createProductWithInventory(
     payload: ProductWithInventoryPayload,
@@ -72,107 +47,10 @@ export interface WixCatalogClient {
 }
 
 /* ---------------------------------------------------------------------------
- * Adaptador MOCK (PoC) — simula Catalog V3 y wix-media-backend en memoria
+ * Cliente REAL (MVP) — @wix/sdk + @wix/stores-catalog + site-properties v4
  * ------------------------------------------------------------------------- */
 
-class MockWixClient implements WixCatalogClient {
-  readonly mode = 'mock' as const;
-  private readonly store = new Map<string, WixProductEntity>();
-
-  async createProductWithInventory(
-    payload: ProductWithInventoryPayload,
-  ): Promise<ProductWithInventoryResponse> {
-    const sku = payload.product.physicalProperties.sku;
-    if (!sku) throw new Error('Mock: falta sku en createProductWithInventory');
-    if (this.store.has(sku)) {
-      // Duplicado de SKU → 409 simulado; el error PROPAGA (create-only) y el
-      // worker reintenta/falla el job visiblemente.
-      const err: any = new Error(`Wix 409: producto con SKU "${sku}" ya existe.`);
-      err.status = 409;
-      throw err;
-    }
-    const product = payload.product;
-    const entity: WixProductEntity = {
-      _id: randomUUID(),
-      revision: 1,
-      sku,
-      name: product.name,
-      productOptions: [],
-      variantsInfo: product.variantsInfo ?? { variants: [] },
-      seoData: product.seoData ?? { tags: [] },
-    };
-    this.store.set(sku, entity);
-    const inv = product.variantsInfo?.variants?.[0]?.inventoryItem;
-    return {
-      product: { id: entity._id, revision: entity.revision },
-      inventoryResults: {
-        results: inv
-          ? [
-              {
-                itemMetadata: { id: randomUUID(), originalIndex: 0, success: true },
-                item: {
-                  id: randomUUID(),
-                  productId: entity._id,
-                  variantId: randomUUID(),
-                  quantity: inv.quantity,
-                  trackQuantity: inv.trackQuantity,
-                  availabilityStatus: 'IN_STOCK',
-                },
-              },
-            ]
-          : [],
-      },
-    };
-  }
-
-  async queryBrands(): Promise<WixBrand[]> {
-    return [
-      { _id: 'mock-brand-1', name: 'Nike' },
-      { _id: 'mock-brand-2', name: 'Adidas' },
-      { _id: 'mock-brand-3', name: 'Puma' },
-    ];
-  }
-
-  async getSiteProperties(): Promise<WixSiteProperties> {
-    return { currency: 'USD', language: 'es-ES' };
-  }
-
-  async uploadImageToMedia(_blobUrl: string, title?: string): Promise<string> {
-    const hash = randomUUID().replace(/-/g, '').slice(0, 16);
-    return `https://mock.wixmedia.example/${hash}/${title ?? 'image'}.jpg`;
-  }
-
-  // (F0) Stubs: el spike usa SIEMPRE el cliente real, no se mockea la lectura.
-  async readProductV3(_id: string, _opts?: { fields?: string[] }): Promise<WixCatalogProduct | null> {
-    console.warn('[wix] mock: readProductV3 no implementado (F0 usa cliente real).');
-    return null;
-  }
-
-  async queryProductsV3(_opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }> {
-    console.warn('[wix] mock: queryProductsV3 no implementado (F0 usa cliente real).');
-    return { products: [], hasMore: false };
-  }
-
-  async queryCategories(): Promise<WixCategory[]> {
-    return [
-      { _id: 'mock-cat-1', name: 'Ropa' },
-      { _id: 'mock-cat-2', name: 'Calzado' },
-      { _id: 'mock-cat-3', name: 'Accesorios' },
-    ];
-  }
-
-  async readCategoryV3(_id: string, _opts?: { fields?: string[] }): Promise<WixCategory | null> {
-    console.warn('[wix] mock: readCategoryV3 no implementado (F0 usa cliente real).');
-    return null;
-  }
-
-}
-
-/* ---------------------------------------------------------------------------
- * Adaptador REAL (MVP) — @wix/sdk + @wix/stores-catalog + site-properties v4
- * ------------------------------------------------------------------------- */
-
-class RealWixClient implements WixCatalogClient {
+class WixClient implements WixCatalogClient {
   readonly mode = 'real' as const;
   private readonly client: any;
   private readonly apiKey: string;
@@ -251,39 +129,7 @@ class RealWixClient implements WixCatalogClient {
     return wixMediaUrl;
   }
 
-  // (F3/F0) Lectura real de Stores Catalog V3 con info de categorías.
-  // Nota: `productsV3.getProduct` recibe el `productId` como argumento posicional.
-  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum RequestedFields).
-  async readProductV3(id: string, opts?: { fields?: string[] }): Promise<WixCatalogProduct | null> {
-    try {
-      const res = await this.client.productsV3.getProduct(
-        id,
-        opts?.fields ? { fields: opts.fields } : undefined,
-      );
-      const product = (res as any)?.product ?? res;
-      return product ? (product as WixCatalogProduct) : null;
-    } catch (err: unknown) {
-      throw contextualWixError('readProductV3', err);
-    }
-  }
-
-  // (F3/F0) Paginado por cursor: devuelve la primera página y si hay más.
-  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum RequestedFields).
-  async queryProductsV3(opts?: { limit?: number; fields?: string[] }): Promise<{ products: WixCatalogProduct[]; hasMore: boolean }> {
-    const limit = opts?.limit ?? 20;
-    try {
-      const result = await this.client.productsV3
-        .queryProducts(opts?.fields ? { fields: opts.fields } : undefined)
-        .limit(limit)
-        .find();
-      const items = (result?.items ?? []) as WixCatalogProduct[];
-      return { products: items, hasMore: Boolean(result?.hasNext?.()) };
-    } catch (err: unknown) {
-      throw contextualWixError(`queryProductsV3(limit=${limit})`, err);
-    }
-  }
-
-  // (F3/F0) Catálogo de categorías del sitio (wix.categories.v1.category).
+  // (F3) Catálogo de categorías del sitio (wix.categories.v1.category).
   // Nota: el builder requiere al menos una condición de filtro no vacía; si solo
   // se pasa `treeReference` en options, Wix responde `INVALID_FILTER` ("empty
   // condition"). Se añade `.eq('treeReference.appNamespace', '@wix/stores')`.
@@ -299,23 +145,6 @@ class RealWixClient implements WixCatalogClient {
       return (result?.items ?? []) as WixCategory[];
     } catch (err: unknown) {
       throw contextualWixError('queryCategories(treeReference=@wix/stores)', err);
-    }
-  }
-
-  // (F0b) Lectura de una categoría por ID (wix.categories.v1.category).
-  // `categories.getCategory(id, treeReference, options?)` exige `treeReference`.
-  // (F0b) `opts.fields` incluye campos OPCIONALES adicionales (enum de categorías).
-  async readCategoryV3(id: string, opts?: { fields?: string[] }): Promise<WixCategory | null> {
-    try {
-      const res = await this.client.categories.getCategory(
-        id,
-        { appNamespace: '@wix/stores' },
-        opts?.fields ? { fields: opts.fields } : undefined,
-      );
-      const category = (res as any)?.category ?? res;
-      return category ? (category as WixCategory) : null;
-    } catch (err: unknown) {
-      throw contextualWixError('readCategoryV3', err);
     }
   }
 
@@ -358,7 +187,6 @@ class RealWixClient implements WixCatalogClient {
   }
 
   // (F6) Lista de marcas por REST (POST stores/v3/brands/query, sin params).
-  // Shape a confirmar en F6a; se acepta `{ brands: [] }` o un arreglo directo.
   async queryBrands(): Promise<WixBrand[]> {
     const url = 'https://www.wixapis.com/stores/v3/brands/query';
     let response: Response;
@@ -393,7 +221,6 @@ class RealWixClient implements WixCatalogClient {
       .filter((b) => (b.id ?? b._id) && b.name)
       .map((b) => ({ _id: (b.id ?? b._id)!, name: b.name! }));
   }
-
 }
 
 /** Deduce el `mimeType` de una imagen por la extensión de su URL (default jpeg). */
@@ -425,7 +252,7 @@ function fileNameFromUrl(url: string): string {
   }
 }
 
-/** Envuelve un error de Wix con el nombre de la operación (diagnóstico F0/F3). */
+/** Envuelve un error de Wix con el nombre de la operación (diagnóstico F3). */
 function contextualWixError(op: string, err: unknown): Error {
   const message = err instanceof Error ? err.message : String(err);
   const wrapped = new Error(`[wix][${op}] ${message}`);
@@ -435,27 +262,23 @@ function contextualWixError(op: string, err: unknown): Error {
 }
 
 /* ---------------------------------------------------------------------------
- * Singleton según configuración
+ * Singleton
  * ------------------------------------------------------------------------- */
 
 let instance: WixCatalogClient | null = null;
 
 export function getWixClient(): WixCatalogClient {
   if (instance) return instance;
-  const hasApiKey = Boolean(env.wixApiKey);
-  const hasSiteId = Boolean(env.wixSiteId);
-  if (env.wixMock || !hasApiKey || !hasSiteId) {
-    console.warn(
-      `[wix][DIAG] ADAPTADOR MOCK en uso (PoC). apiKeyDefinida=${hasApiKey}, siteIdDefinida=${hasSiteId}. ` +
-        'Revisa WIX_API_KEY/WIX_SITE_ID en Railway y REINICIA el servicio.',
+  if (!env.wixApiKey || !env.wixSiteId) {
+    throw new Error(
+      '[wix] WIX_API_KEY/WIX_SITE_ID no configurados (no hay adaptador mock). ' +
+        'Configúralos en Railway o en backend/.env y reinicia el servicio.',
     );
-    instance = new MockWixClient();
-  } else {
-    console.log(
-      `[wix][DIAG] Cliente REAL (Catalog V3). apiKeyDefinida=${hasApiKey}, siteIdDefinida=${hasSiteId}.`,
-    );
-    instance = new RealWixClient(env.wixApiKey!, env.wixSiteId!);
   }
+  console.log(
+    `[wix][DIAG] Cliente REAL (Catalog V3). siteIdDefinida=${Boolean(env.wixSiteId)}.`,
+  );
+  instance = new WixClient(env.wixApiKey, env.wixSiteId);
   return instance;
 }
 

@@ -7,9 +7,6 @@
  *   Zod de la frontera A) y `responseMimeType: application/json`.
  * - Valida con Zod (errores por campo) y construye el JSON-LD con la moneda e
  *   idioma dinámicos del sitio Wix.
- *
- * Modo demo (`GEMINI_MOCK=1` o sin `GEMINI_API_KEY`): devuelve un resultado
- * determinista para validar el flujo punta a punta de la PoC sin costos de IA.
  */
 import { GoogleGenAI } from '@google/genai';
 import { getWixClient } from '../config/wixClient.js';
@@ -109,49 +106,10 @@ function buildPrompt(opts: AnalyzeOptions = {}): string {
   return parts.join('');
 }
 
-function mockAnalyze(imageUrls: string[], opts: AnalyzeOptions = {}): AnalyzeResponse {
-  const index = imageUrls.length;
-  const price = 199 + index * 100;
-  const currency = 'USD';
-  const name = opts.category
-    ? `Producto de ejemplo (${opts.category})`
-    : 'Producto de ejemplo';
-  const data: GeminiOutput = {
-    name,
-    // (F8) Markdown simple (negrita + lista) para validar el flujo Markdown →
-    // marked → HTML → plainDescription (Rich Content) en modo demo.
-    description:
-      '**Producto capturado en modo demo (GEMINI_MOCK).**\n\n' +
-      'Reemplaza esta descripción con la real antes de aprobar.\n\n' +
-      '- Material: 100% algodón\n' +
-      '- Color: disponible en varias opciones',
-    price,
-    currency,
-    category: opts.sendCategory ? (opts.category ?? null) : null,
-    brand: opts.sendBrand ? (opts.brand ?? null) : null,
-    barcode: null,
-    skuSuggestion: 'DEMO-001',
-    variants: [
-      { name: 'Talla', value: 'M', price },
-      { name: 'Talla', value: 'L', price: price + 50 },
-    ],
-  };
-  const sku = buildSku(data.skuSuggestion, data.barcode);
-  const site = { currency, language: 'es-ES' };
-  const jsonLd = buildJsonLd(data, { sku, currency: site.currency, language: site.language });
-  return { product: toGeminiProductResult(data, jsonLd) };
-}
-
 export async function analyzeProduct(
   imageUrls: string[],
   opts: AnalyzeOptions = {},
 ): Promise<AnalyzeResponse> {
-  // Modo demo / sin API key
-  if (!env.geminiApiKey || process.env.GEMINI_MOCK === '1') {
-    console.warn('[gemini] Modo demo (sin GEMINI_API_KEY o GEMINI_MOCK=1).');
-    return mockAnalyze(imageUrls, opts);
-  }
-
   const genai = new GoogleGenAI({ apiKey: env.geminiApiKey });
   const images = await Promise.all(imageUrls.map(downloadImageAsBase64));
 
@@ -190,7 +148,7 @@ export async function analyzeProduct(
     return { product, fieldErrors: validation.fieldErrors };
   }
 
-  // Moneda e idioma dinámicos del sitio (site-properties v4 / mock)
+  // Moneda e idioma dinámicos del sitio (site-properties v4)
   const site = await getWixClient().getSiteProperties();
   const sku = buildSku(data.skuSuggestion, data.barcode);
   const jsonLd = buildJsonLd(data, {

@@ -294,16 +294,6 @@ export interface SettingsUpdate {
  * Wix Catalog V3 (payloads)
  * ------------------------------------------------------------------------- */
 
-export interface WixProductEntity {
-  _id: string;
-  revision: string | number;
-  sku?: string;
-  name?: string;
-  productOptions?: unknown[];
-  variantsInfo?: { variants?: unknown[] };
-  seoData?: { tags?: unknown[] };
-}
-
 export interface WixSiteProperties {
   currency: string;
   language: string;
@@ -395,45 +385,6 @@ export interface WixBrand {
 
 /** Opción de categoría para el frontend (id + nombre) — `Pick<WixCategory, '_id' | 'name'>`. */
 export type CategoryOption = Pick<WixCategory, '_id' | 'name'>;
-
-/* ---------------------------------------------------------------------------
- * Wix Catalog V3 (lectura) — Modelos de Referencia (F3)
- * ------------------------------------------------------------------------- */
-
-/** Categoría referenciada por un producto Catalog V3 (allCategoriesInfo / directCategoriesInfo). */
-export interface WixCategoryInfo {
-  /** ID de la categoría en el catálogo de categorías de Wix (wix.categories.v1.category). */
-  _id?: string | null;
-  /** Índice/orden de la categoría dentro de la lista del producto. */
-  index?: number | null;
-}
-
-/**
- * Producto de Wix Stores Catalog V3 tal como lo devuelve el SDK real.
- * Incluye la info de categorías que F3 necesita (`allCategoriesInfo`,
- * `directCategoriesInfo`, `mainCategoryId`) y los campos base de la extracción
- * de schema (`productOptions`, `variantsInfo`, `discount`, `media`).
- * Se mantiene flexible (`[key: string]: unknown`) para no perder campos que el
- * spike F0 debe verificar.
- */
-export interface WixCatalogProduct {
-  _id?: string | null;
-  revision?: string | null;
-  sku?: string | null;
-  name?: string | null;
-  description?: string | null;
-  /** Lista de TODAS las categorías del producto (ancestros incluidos). */
-  allCategoriesInfo?: { categories?: WixCategoryInfo[] } | null;
-  /** Lista de categorías DIRECTAS del producto. */
-  directCategoriesInfo?: { categories?: WixCategoryInfo[] } | null;
-  /** Categoría principal que define la estructura del schema (default de ronda). */
-  mainCategoryId?: string | null;
-  productOptions?: unknown[];
-  variantsInfo?: unknown;
-  discount?: unknown;
-  media?: unknown;
-  [key: string]: unknown;
-}
 
 /** Categoría del catálogo de categorías de Wix (wix.categories.v1.category). */
 export interface WixCategory {
