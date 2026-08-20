@@ -1,8 +1,10 @@
 /**
  * CRUD de productos/capturas + confirmar y encolar.
- *  - POST /api/products        → guardar captura como borrador (genera SKU y JSON-LD)
- *  - GET  /api/products        → listar capturas
- *  - POST /api/products/:id/approve → aprobar y crear job (pending) en la cola
+ *  - POST   /api/products          → guardar captura como borrador (genera SKU y JSON-LD)
+ *  - GET    /api/products          → listar capturas (opcional ?status=)
+ *  - PUT    /api/products/:id      → actualizar un borrador EN SITIO (conserva status='draft')
+ *  - DELETE /api/products/:id      → descartar un borrador (solo status='draft')
+ *  - POST   /api/products/:id/approve → aprobar y crear job (pending) en la cola
  */
 import type { Request, Response } from 'express';
 import { z } from 'zod';
@@ -31,7 +33,9 @@ const draftSchema = z.object({
   jsonLd: z.any().optional(),
 });
 
-export async function create(req: Request, res: Response): Promise<void> {
+type DraftBody = z.infer<typeof draftSchema>;
+
+function parseDraft(req: Request, res: Response): DraftBody | null {
   const parsed = draftSchema.safeParse(req.body);
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -40,11 +44,27 @@ export async function create(req: Request, res: Response): Promise<void> {
       if (!fieldErrors[field]) fieldErrors[field] = issue.message;
     }
     res.status(400).json({ error: 'Body inválido', fieldErrors });
-    return;
+    return null;
   }
-  const body = parsed.data;
-  const settings = await getSettings();
+  return parsed.data;
+}
 
+/** Error de SKU duplicado (UNIQUE products_sku_key) → mensaje amigable por campo. */
+function sendSkuConflict(res: Response): void {
+  res.status(400).json({
+    error: 'Ya existe un producto con ese SKU.',
+    fieldErrors: { sku: 'El SKU ya existe; cámbialo o déjalo vacío para autogenerarlo.' },
+  });
+}
+
+/**
+ * Construcción compartida de los campos derivados del borrador (misma regla en
+ * create y update): SKU final, barcode saneado, JSON-LD y variantes en forma Wix.
+ */
+function buildDraftFields(
+  body: DraftBody,
+  settings: { skuPrefix: string; currency: string; language: string },
+): { sku: string; barcode: string | null; jsonLd: unknown; wixVariants: unknown } {
   // (C) SKU final: el usuario puede enviar uno explícito (editable en el
   // formulario); si viene vacío se genera `SKU-` + sugerencia de Gemini, con el
   // barcode como respaldo y, en última instancia, un código aleatorio.
@@ -76,6 +96,15 @@ export async function create(req: Request, res: Response): Promise<void> {
   const wixVariants =
     Array.isArray(rawVariants) ? geminiVariantsToWix(rawVariants) : rawVariants;
 
+  return { sku, barcode, jsonLd, wixVariants };
+}
+
+export async function create(req: Request, res: Response): Promise<void> {
+  const body = parseDraft(req, res);
+  if (!body) return;
+  const settings = await getSettings();
+  const { sku, barcode, jsonLd, wixVariants } = buildDraftFields(body, settings);
+
   let rows: any[];
   try {
     ({ rows } = await query(
@@ -99,12 +128,8 @@ export async function create(req: Request, res: Response): Promise<void> {
       ],
     ));
   } catch (err: any) {
-    // SKU duplicado (UNIQUE products_sku_key) → error amigable para el formulario.
     if (err?.code === '23505' && err?.constraint === 'products_sku_key') {
-      res.status(400).json({
-        error: 'Ya existe un producto con ese SKU.',
-        fieldErrors: { sku: 'El SKU ya existe; cámbialo o déjalo vacío para autogenerarlo.' },
-      });
+      sendSkuConflict(res);
       return;
     }
     throw err;
@@ -124,6 +149,92 @@ export async function list(req: Request, res: Response): Promise<void> {
       )
     : await query('SELECT * FROM products ORDER BY created_at DESC');
   res.json({ products: rows.map(rowToProduct) });
+}
+
+/**
+ * PUT /api/products/:id — actualiza un borrador EN SITIO (sin duplicar).
+ * Solo permite editar productos cuyo status sigue siendo 'draft'; se conserva
+ * el status (el cambio a 'approved' lo hace el endpoint de approve).
+ */
+export async function update(req: Request, res: Response): Promise<void> {
+  const id = req.params.id;
+  const body = parseDraft(req, res);
+  if (!body) return;
+  const settings = await getSettings();
+  const { sku, barcode, jsonLd, wixVariants } = buildDraftFields(body, settings);
+
+  let rows: any[];
+  try {
+    ({ rows } = await query(
+      `UPDATE products SET
+         sku = $2,
+         name = $3,
+         description = $4,
+         price = $5,
+         currency = $6,
+         category = $7,
+         brand = $8,
+         barcode = $9,
+         variants = $10,
+         json_ld = $11,
+         image_urls = $12,
+         updated_at = now()
+       WHERE id = $1 AND status = 'draft'
+       RETURNING *`,
+      [
+        id,
+        sku,
+        body.name,
+        body.description ?? null,
+        body.price ?? null,
+        body.currency ?? settings.currency,
+        body.category ?? null,
+        body.brand ?? null,
+        barcode,
+        JSON.stringify(wixVariants),
+        JSON.stringify(jsonLd),
+        body.imageUrls ?? [],
+      ],
+    ));
+  } catch (err: any) {
+    if (err?.code === '23505' && err?.constraint === 'products_sku_key') {
+      sendSkuConflict(res);
+      return;
+    }
+    throw err;
+  }
+
+  if (rows.length === 0) {
+    const found = await query('SELECT status FROM products WHERE id = $1', [id]);
+    if (found.rows.length === 0) throw new HttpError(404, 'Producto no encontrado');
+    throw new HttpError(409, 'El producto ya no es un borrador');
+  }
+
+  const product = rowToProduct(rows[0]);
+  await audit('product:updated', { productId: product.id, sku, name: product.name });
+  res.json({ product });
+}
+
+/**
+ * DELETE /api/products/:id — descarta un borrador (solo status='draft').
+ */
+export async function remove(req: Request, res: Response): Promise<void> {
+  const id = req.params.id;
+  const { rows } = await query(
+    `DELETE FROM products WHERE id = $1 AND status = 'draft' RETURNING id, sku, name`,
+    [id],
+  );
+  if (rows.length === 0) {
+    const found = await query('SELECT status FROM products WHERE id = $1', [id]);
+    if (found.rows.length === 0) throw new HttpError(404, 'Producto no encontrado');
+    throw new HttpError(409, 'El producto ya no es un borrador');
+  }
+  await audit('product:deleted', {
+    productId: rows[0].id,
+    sku: rows[0].sku,
+    name: rows[0].name,
+  });
+  res.status(204).end();
 }
 
 export async function approve(req: Request, res: Response): Promise<void> {

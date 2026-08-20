@@ -10,10 +10,11 @@ import { Router } from '@angular/router';
 import {
   pendingAnalysis,
   pendingImageUrls,
+  recycleDraft,
   resetCapture,
 } from '../../services/capture-store';
 import { setPendingJob, showToast } from '../../services/toast';
-import { createProduct, approveProduct } from '../../services/products';
+import { createProduct, updateProduct, approveProduct } from '../../services/products';
 import {
   autoApproved,
   settings,
@@ -72,12 +73,20 @@ function buildSkuPreview(
     <div class="space-y-6">
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Revisar producto</h1>
-        <button (click)="back()" class="text-sm text-brand-600 hover:underline">← Nueva captura</button>
+        <button (click)="back()" class="text-sm text-brand-600 hover:underline">
+          {{ recycleDraft() ? '← Volver' : '← Nueva captura' }}
+        </button>
       </div>
 
       <p *ngIf="!pendingAnalysis()" class="text-slate-500 bg-white rounded-xl p-6 shadow text-center">
         No hay análisis pendiente. Ve a <a routerLink="/" class="text-brand-600 underline">Captura</a>
         y analiza un producto primero.
+      </p>
+
+      <p *ngIf="recycleDraft() as recycled"
+         class="text-xs text-brand-700 bg-brand-50 border border-brand-200 rounded-lg px-3 py-2">
+        ✏️ Editando borrador <span class="font-semibold">{{ recycled.sku }}</span> — al guardar se
+        actualiza este mismo producto.
       </p>
 
       <ng-container *ngIf="pendingAnalysis() as analysis">
@@ -180,6 +189,7 @@ export class ProductFormComponent implements OnInit {
   form!: FormGroup;
   pendingAnalysis = pendingAnalysis;
   imageUrls = pendingImageUrls;
+  recycleDraft = recycleDraft;
   autoApproved = autoApproved;
   settings = settings;
   wixCategories = wixCategories;
@@ -198,17 +208,22 @@ export class ProductFormComponent implements OnInit {
     const analysis = pendingAnalysis();
     const defaults = settings() ?? null;
     const prefix = defaults?.skuPrefix ?? 'SKU-';
-    this.skuSuggestion = analysis?.product.skuSuggestion ?? null;
-    const initialBarcode = analysis?.product.barcode ?? null;
+    // Modo reciclado: se edita el MISMO borrador (datos + SKU exacto). El
+    // skuSuggestion original no se persiste, por eso aquí va null.
+    const recycled = recycleDraft();
+    this.skuSuggestion = recycled ? null : (analysis?.product.skuSuggestion ?? null);
+    const initialBarcode = recycled
+      ? (recycled.barcode ?? null)
+      : (analysis?.product.barcode ?? null);
     this.form = this.fb.group({
-      name: [analysis?.product.name ?? '', Validators.required],
-      description: [analysis?.product.description ?? ''],
-      price: [analysis?.product.price ?? null],
-      currency: [analysis?.product.currency ?? defaults?.currency ?? 'USD'],
-      category: [analysis?.product.category ?? defaultCategory() ?? null],
-      brand: [analysis?.product.brand ?? null],
+      name: [recycled?.name ?? analysis?.product.name ?? '', Validators.required],
+      description: [recycled?.description ?? analysis?.product.description ?? ''],
+      price: [recycled?.price ?? analysis?.product.price ?? null],
+      currency: [recycled?.currency ?? analysis?.product.currency ?? defaults?.currency ?? 'USD'],
+      category: [recycled?.category ?? analysis?.product.category ?? defaultCategory() ?? null],
+      brand: [recycled?.brand ?? analysis?.product.brand ?? null],
       barcode: [initialBarcode ?? ''],
-      sku: [buildSkuPreview(this.skuSuggestion, initialBarcode, prefix)],
+      sku: [recycled?.sku ?? buildSkuPreview(this.skuSuggestion, initialBarcode, prefix)],
     });
     // SKU en vivo: se regenera al editar el barcode SOLO si el usuario no lo ha
     // tocado manualmente (skuControl.dirty); si ya lo editó, se respeta su valor.
@@ -218,11 +233,16 @@ export class ProductFormComponent implements OnInit {
         skuControl.setValue(buildSkuPreview(this.skuSuggestion, value, prefix), { emitEvent: false });
       }
     });
+    // En reciclado, el SKU guardado es el "definitivo": márcalo como tocado para
+    // que la suscripción del barcode NO lo sobrescriba con la vista previa.
+    if (recycled) this.form.controls['sku'].markAsDirty();
   }
 
   back(): void {
+    const recycled = recycleDraft();
     resetCapture();
-    void this.router.navigate(['/']);
+    // En modo reciclado, "volver" regresa al dashboard de donde vino.
+    void this.router.navigate(recycled ? ['/dashboard'] : ['/']);
   }
 
   private buildPayload(): {
@@ -250,7 +270,7 @@ export class ProductFormComponent implements OnInit {
       skuSuggestion: this.skuSuggestion,
       sku: v.sku ? String(v.sku).trim() : null,
       imageUrls: this.imageUrls(),
-      variants: toWixVariants(pendingAnalysis()?.product.variants ?? []),
+      variants: recycleDraft()?.variants ?? toWixVariants(pendingAnalysis()?.product.variants ?? []),
     };
   }
 
@@ -262,8 +282,19 @@ export class ProductFormComponent implements OnInit {
     }
     this.saving.set(true);
     try {
-      await createProduct(this.buildPayload());
-      this.back();
+      const recycled = recycleDraft();
+      const payload = this.buildPayload();
+      if (recycled) {
+        // Reciclado: se actualiza el MISMO borrador (sin duplicar).
+        await updateProduct(recycled.id, payload);
+      } else {
+        await createProduct(payload);
+      }
+      // Decisión del usuario: tras guardar un borrador SIEMPRE se va al
+      // dashboard, posicionado al inicio de la lista de borradores.
+      resetCapture();
+      this.error.set('');
+      await this.router.navigate(['/dashboard'], { fragment: 'borradores' });
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'Error al guardar');
     } finally {
@@ -279,7 +310,13 @@ export class ProductFormComponent implements OnInit {
     }
     this.saving.set(true);
     try {
-      const { product } = await createProduct(this.buildPayload());
+      const recycled = recycleDraft();
+      const payload = this.buildPayload();
+      // Reciclado: primero se actualiza el MISMO borrador, luego se aprueba.
+      // Captura nueva: se crea y se aprueba (flujo existente).
+      const product = recycled
+        ? (await updateProduct(recycled.id, payload)).product
+        : (await createProduct(payload)).product;
       const { job } = await approveProduct(product.id);
       // F7: toast de encolado + preparar el toast FINAL vía SSE. `pendingJobId`
       // se setea ANTES de navegar (el effect vive en AppComponent, siempre

@@ -53,6 +53,8 @@ export async function startServer(): Promise<void> {
   app.post('/api/analyze', requireDevice, asyncHandler(analyze));
   app.post('/api/products', requireDevice, asyncHandler(productsController.create));
   app.get('/api/products', requireDevice, asyncHandler(productsController.list));
+  app.put('/api/products/:id', requireDevice, asyncHandler(productsController.update));
+  app.delete('/api/products/:id', requireDevice, asyncHandler(productsController.remove));
   app.post('/api/products/:id/approve', requireDevice, asyncHandler(productsController.approve));
   app.get('/api/jobs', requireDevice, asyncHandler(jobsController.list));
   app.post('/api/jobs/:id/retry', requireDevice, asyncHandler(jobsController.retry));

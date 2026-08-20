@@ -6,7 +6,11 @@ import { uploadImage } from '../../services/upload';
 import { analyzeImages } from '../../services/products';
 import { settings, defaultCategory, wixBrands, wixCategories, deviceToken } from '../../services/session';
 import { getDeviceToken, SessionMissingError } from '../../services/api';
-import { setPendingImages, setPendingAnalysis } from '../../services/capture-store';
+import {
+  setPendingImages,
+  setPendingAnalysis,
+  setRecycleDraft,
+} from '../../services/capture-store';
 
 @Component({
   selector: 'app-capture',
@@ -187,6 +191,10 @@ export class CaptureComponent implements OnInit {
         urls.push(await uploadImage(file));
       }
       setPendingImages(urls);
+      // Una captura nueva deja de editar cualquier borrador reciclado: evita que
+      // un recycleDraft previo (p. ej. tras salir con el nav "Captura" sin guardar)
+      // contamine el formulario de este nuevo análisis.
+      setRecycleDraft(null);
 
       // 2) Análisis con Gemini
       const result = await analyzeImages({

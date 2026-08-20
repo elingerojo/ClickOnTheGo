@@ -27,6 +27,16 @@ export function createProduct(input: ProductDraftInput): Promise<{ product: Prod
   return api<{ product: ProductCapture }>('/api/products', { method: 'POST', body: input });
 }
 
+/** Actualiza un borrador EN SITIO (conserva status='draft'). */
+export function updateProduct(id: string, input: ProductDraftInput): Promise<{ product: ProductCapture }> {
+  return api<{ product: ProductCapture }>(`/api/products/${id}`, { method: 'PUT', body: input });
+}
+
+/** Descarta un borrador (solo status='draft'). */
+export function deleteProduct(id: string): Promise<void> {
+  return api<void>(`/api/products/${id}`, { method: 'DELETE' });
+}
+
 export function approveProduct(id: string): Promise<{ job: Job }> {
   return api<{ job: Job }>(`/api/products/${id}/approve`, { method: 'POST' });
 }

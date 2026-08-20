@@ -1,10 +1,18 @@
-import { Component, OnInit, computed, effect, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, signal, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router } from '@angular/router';
 import { listJobs, retryJob } from '../../services/jobs';
 import { listDevices, revokeDevice } from '../../services/settings';
+import { listProducts, deleteProduct } from '../../services/products';
+import {
+  setPendingImages,
+  setPendingAnalysis,
+  setRecycleDraft,
+  toRecycleAnalysis,
+} from '../../services/capture-store';
 import { deviceId, setCurrentDeviceId } from '../../services/session';
 import { latestJob, sseConnected } from '../../services/sse';
-import type { Device, Job } from '@click-on-the-go/shared';
+import type { Device, Job, ProductCapture } from '@click-on-the-go/shared';
 
 const STATE_STYLES: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800',
@@ -93,6 +101,58 @@ function limitJobs(jobs: Job[]): Job[] {
         </div>
       </div>
 
+      <!-- Borradores (después de jobs; inicio de la lista = #borradores) -->
+      <div #draftsSection class="bg-white rounded-2xl shadow overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h2 class="font-semibold">Borradores de captura</h2>
+          <button (click)="refreshDrafts()" class="text-sm text-brand-600 hover:underline">Refrescar</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left">
+              <tr>
+                <th class="px-5 py-3">Producto</th>
+                <th class="px-5 py-3">SKU</th>
+                <th class="px-5 py-3">Precio</th>
+                <th class="px-5 py-3">Categoría</th>
+                <th class="px-5 py-3">Actualizado</th>
+                <th class="px-5 py-3"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr *ngFor="let d of drafts()">
+                <td class="px-5 py-3">
+                  <div class="flex items-center gap-3">
+                    <img *ngIf="d.imageUrls.length" [src]="d.imageUrls[0]"
+                         class="h-10 w-10 rounded-lg object-cover border border-slate-200" />
+                    <span class="font-medium">{{ d.name }}</span>
+                  </div>
+                </td>
+                <td class="px-5 py-3 text-slate-500">{{ d.sku }}</td>
+                <td class="px-5 py-3 text-slate-500">{{ formatPrice(d) }}</td>
+                <td class="px-5 py-3 text-slate-500">{{ d.category ?? '—' }}</td>
+                <td class="px-5 py-3 text-slate-400 text-xs">{{ d.updatedAt | date: 'short' }}</td>
+                <td class="px-5 py-3">
+                  <div class="flex items-center gap-2">
+                    <button
+                      (click)="recycle(d)"
+                      class="px-3 py-1 rounded-lg bg-brand-600 text-white text-xs hover:bg-brand-700"
+                    >Reciclar</button>
+                    <button
+                      (click)="removeDraft(d)"
+                      class="px-3 py-1 rounded-lg bg-red-50 text-red-600 text-xs hover:bg-red-100"
+                    >Eliminar</button>
+                  </div>
+                </td>
+              </tr>
+              <tr *ngIf="drafts().length === 0">
+                <td colspan="6" class="px-5 py-8 text-center text-slate-400">Sin borradores todavía</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Dispositivos -->
       <div class="bg-white rounded-2xl shadow overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100">
@@ -118,12 +178,16 @@ function limitJobs(jobs: Job[]): Job[] {
   `,
 })
 export class JobsDashboardComponent implements OnInit {
+  @ViewChild('draftsSection', { static: false }) draftsSection?: ElementRef<HTMLElement>;
+
   jobs = signal<Job[]>([]);
   /**
    * Vista limitada del listado para que no crezca infinitamente: todos los
    * jobs con updatedAt < 5 días (sin tope) + relleno con antiguos hasta 20.
    */
   visibleJobs = computed(() => limitJobs(this.jobs()));
+  /** Productos en estado draft (capturas guardadas sin aprobar). */
+  drafts = signal<ProductCapture[]>([]);
   devices = signal<Device[]>([]);
   /**
    * Solo los OTROS dispositivos: se oculta el dispositivo actual (no puede
@@ -135,7 +199,10 @@ export class JobsDashboardComponent implements OnInit {
   /** Estado de la conexión SSE (store compartido a nivel app-root). */
   sseConnected = sseConnected;
 
-  constructor() {
+  constructor(
+    private readonly route: ActivatedRoute,
+    private readonly router: Router,
+  ) {
     // Actualizaciones en vivo de jobs vía SSE: hace upsert del último job
     // notificado sobre la lista local. La conexión la gestiona AppComponent.
     effect(() => {
@@ -153,6 +220,15 @@ export class JobsDashboardComponent implements OnInit {
 
   ngOnInit(): void {
     void this.refresh();
+    // Al llegar con #borradores (p. ej. tras "Guardar borrador") desplaza al
+    // inicio de la lista de borradores, justo debajo de los jobs.
+    this.route.fragment.subscribe((f) => {
+      if (f === 'borradores') {
+        setTimeout(() => {
+          this.draftsSection?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+      }
+    });
   }
 
   async refresh(): Promise<void> {
@@ -167,10 +243,47 @@ export class JobsDashboardComponent implements OnInit {
     } catch (err) {
       console.error('Error cargando dashboard', err);
     }
+    await this.refreshDrafts();
+  }
+
+  async refreshDrafts(): Promise<void> {
+    try {
+      const { products } = await listProducts('draft');
+      this.drafts.set(products);
+    } catch (err) {
+      console.error('Error cargando borradores', err);
+    }
   }
 
   stateStyle(state: string): string {
     return STATE_STYLES[state] ?? 'bg-slate-100 text-slate-700';
+  }
+
+  formatPrice(product: ProductCapture): string {
+    return product.price != null ? `${product.price} ${product.currency}` : '—';
+  }
+
+  /**
+   * Recicla un borrador: rehidrata el análisis (como si Gemini acabara de
+   * responder) con los datos y fotos del MISMO producto y abre el formulario
+   * de revisión. Al guardar/aprobar se actualiza ese registro (sin duplicar).
+   */
+  recycle(product: ProductCapture): void {
+    setPendingImages(product.imageUrls ?? []);
+    setPendingAnalysis(toRecycleAnalysis(product));
+    setRecycleDraft(product);
+    void this.router.navigate(['/producto']);
+  }
+
+  async removeDraft(product: ProductCapture): Promise<void> {
+    if (!confirm(`¿Eliminar el borrador "${product.name}" (${product.sku})?`)) return;
+    try {
+      await deleteProduct(product.id);
+      await this.refreshDrafts();
+    } catch (err) {
+      console.error('Error eliminando borrador', err);
+      alert('No se pudo eliminar el borrador.');
+    }
   }
 
   async retry(job: Job): Promise<void> {
