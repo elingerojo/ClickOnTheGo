@@ -294,20 +294,6 @@ export interface SettingsUpdate {
  * Wix Catalog V3 (payloads)
  * ------------------------------------------------------------------------- */
 
-export interface WixProductPayload {
-  name: string;
-  sku?: string;
-  description?: string;
-  productType?: 'physical' | 'digital';
-  visible?: boolean;
-  priceData?: { price?: number; currency?: string };
-  media?: { mediaItems?: Array<{ url?: string; title?: string }> };
-  manageVariants?: boolean;
-  productOptions?: unknown[];
-  variantsInfo?: { variants?: unknown[] };
-  seoData?: { tags?: unknown[] };
-}
-
 export interface WixProductEntity {
   _id: string;
   revision: string | number;
@@ -375,7 +361,7 @@ export interface ProductWithInventoryPayload {
     description?: string | { nodes?: unknown[] };
     plainDescription?: string;
     // (F7) Media propia de Wix Media: el worker reemplaza las URLs del Blob por
-    // las de Wix Media antes del upsert. Shape CONFIRMADO por el spike F7 real:
+    // las de Wix Media antes del alta (create). Shape CONFIRMADO por el spike F7 real:
     // `media.itemsInfo.items[]` (cada item con `url` externa + `displayName` +
     // `mediaType`). `mediaItems` NO es una clave válida en Catalog V3.
     media?: {
@@ -399,21 +385,6 @@ export interface ProductWithInventoryResponse {
   /** Aplicación de inventario por variante (F6a real: `inventoryResults.results`). */
   inventoryResults?: { results?: Array<Record<string, unknown>> };
   inventoryOptions?: { variants?: Array<{ inventoryOptions?: { quantity?: number } }> };
-}
-
-/** Inventory item de Wix (módulo inventory-items-v3): entidad donde vive la CANTIDAD real.
- * `products-with-inventory` NO la crea; hay que crearla aparte con `createInventoryItem`.
- */
-export interface WixInventoryItem {
-  id: string;
-  productId: string;
-  variantId: string;
-  locationId?: string;
-  quantity?: number;
-  trackQuantity?: boolean;
-  inStock?: boolean;
-  availabilityStatus?: string;
-  [k: string]: unknown;
 }
 
 /** Marca de Wix (GET/POST stores/v3/brands) para el selector y el alta `brand: { id }`. */

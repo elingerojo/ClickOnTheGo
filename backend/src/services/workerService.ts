@@ -7,15 +7,16 @@
  *   lo pasa a `processing` y emite evento SSE.
  * - Carga multimedia: copia cada imagen desde Vercel Blob a
  *   `wix-media-backend` y guarda la URL de Wix Media en `products.image_urls`.
- * - Ejecución: UPSERT por SKU (`wixCatalogService`).
+ * - Ejecución: ALTA (create-only) en Wix Catalog V3 (`wixCatalogService`).
  * - Éxito: `state = success` + `wix_product_id`/`revision` + SSE.
- * - Fallo: reintentos con backoff (re-encolar al final); conflicto de revisión
- *   → re-leer y reintentar; si agota, `state = error` con `last_error`.
+ * - Fallo: reintentos con backoff (re-encolar al final); si agota,
+ *   `state = error` con `last_error`. Un SKU duplicado (HTTP 409) también
+ *   falla visiblemente (ya no hay skip silencioso de upsert).
  */
 import { pool } from '../config/db.js';
 import { sseBus } from '../config/sse.js';
 import { getWixClient } from '../config/wixClient.js';
-import { upsertProductV3 } from './wixCatalogService.js';
+import { createProductV3 } from './wixCatalogService.js';
 import { getSettings } from './settingsService.js';
 import { audit } from './auditService.js';
 import { JOB_PRODUCT_SELECT, rowToJobWithProduct } from './mappers.js';
@@ -139,18 +140,18 @@ async function processJob(jobId: string): Promise<void> {
       }
     }
 
-    const result = await upsertProductV3(product, { quantity, visible, brandId });
+    const result = await createProductV3(product, { quantity, visible, brandId });
 
-    // 3) Éxito (creado o SKU ya existente → sin inventario nuevo)
+    // 3) Éxito: el producto se creó en Wix (create-only, sin ruta de update).
     await pool.query(
       `UPDATE jobs SET state = 'success', attempts = attempts + 1, last_error = NULL, updated_at = now() WHERE id = $1`,
       [jobId],
     );
-    // Si result.productId es null (SKU ya existía → 409), se conserva el id
-    // previo con COALESCE en vez de sobrescribirlo con NULL.
+    // El alta siempre devuelve `wix_product_id` (create-only); ya no existe el
+    // caso de SKU duplicado que conservaba el id previo (el upsert se eliminó).
     await pool.query(
       `UPDATE products
-          SET status = 'synced', wix_product_id = COALESCE($1, wix_product_id), wix_revision = $2, updated_at = now()
+          SET status = 'synced', wix_product_id = $1, wix_revision = $2, updated_at = now()
         WHERE id = $3`,
       [result.productId, Number(result.revision ?? 0), product.id],
     );
@@ -161,7 +162,6 @@ async function processJob(jobId: string): Promise<void> {
       productId: product.id,
       sku: product.sku,
       wixProductId: result.productId,
-      created: result.created,
       inventoryQuantity: result.inventoryQuantity,
     });
   } catch (err: any) {
@@ -206,14 +206,6 @@ async function handleJobError(jobId: string, product: ProductCapture, err: Error
   const updated = await loadJobWithProduct(jobId);
   if (updated) sseBus.emit({ type: 'job:state', data: updated });
   await audit('job:error', { jobId, productId: product.id, sku: product.sku, error: err.message });
-}
-
-/** Función auxiliar para el claim en transacciones (evita import circular). */
-export async function updateProductStatus(id: string, status: string): Promise<void> {
-  await pool.query(`UPDATE products SET status = $1, updated_at = now() WHERE id = $2`, [
-    status,
-    id,
-  ]);
 }
 
 export function isWorkerRunning(): boolean {

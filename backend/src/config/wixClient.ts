@@ -2,17 +2,17 @@
  * Cliente de Wix Catalog V3 con ADAPTADOR MOCK para la PoC.
  *
  * Misma interfaz que el SDK real (`@wix/stores-catalog` + `@wix/sdk`):
- *   - queryProducts().eq('sku', sku)
- *   - createProduct / updateProduct
+ *   - stores/v3/products-with-inventory (alta con inventario, create-only)
  *   - site-properties/v4/properties (moneda e idioma dinámicos)
  *   - wix-media-backend (copia de imágenes)
+ *   - Stores Catalog V3 (lectura de productos/categorías, F0/F3)
  *
  * Si faltan `WIX_API_KEY` / `WIX_SITE_ID` (env), se usa el mock
  * (in-memory) para validar el flujo punta a punta sin credenciales reales.
  */
 import { randomUUID } from 'node:crypto';
 import { createClient, ApiKeyStrategy } from '@wix/sdk';
-import { products, productsV3 } from '@wix/stores';
+import { productsV3 } from '@wix/stores';
 import * as categories from '@wix/auto_sdk_categories_categories';
 import { files } from '@wix/media';
 import { env } from './env.js';
@@ -22,23 +22,12 @@ import type {
   WixBrand,
   WixCategory,
   WixCatalogProduct,
-  WixInventoryItem,
-  WixProductPayload,
   WixProductEntity,
   WixSiteProperties,
 } from '@click-on-the-go/shared';
 
 export interface WixCatalogClient {
   readonly mode: 'mock' | 'real';
-  /** Busca un producto por SKU. Devuelve `null` si no existe. */
-  queryBySku(sku: string): Promise<WixProductEntity | null>;
-  /** Crea un producto (payload con `product`). */
-  createProduct(input: { product: WixProductPayload }): Promise<WixProductEntity>;
-  /** Actualiza un producto (exige `revision` para control de concurrencia). */
-  updateProduct(
-    id: string,
-    input: { revision: string | number; product: WixProductPayload },
-  ): Promise<WixProductEntity>;
   /** Moneda e idioma del sitio (site-properties v4). */
   getSiteProperties(): Promise<WixSiteProperties>;
   /**
@@ -78,27 +67,8 @@ export interface WixCatalogClient {
   createProductWithInventory(
     payload: ProductWithInventoryPayload,
   ): Promise<ProductWithInventoryResponse>;
-  /** (F6) Chequeo de existencia por SKU — SOLO V3 (productsV3.queryProducts). */
-  queryBySkuV3(sku: string): Promise<WixProductEntity | null>;
   /** (F6) Lista de marcas del sitio (REST POST /stores/v3/brands/query, sin params). */
   queryBrands(): Promise<WixBrand[]>;
-  /**
-   * (F6) Crea un inventory item (entidad donde vive la CANTIDAD real) para la
-   * variante de un producto. `products-with-inventory` NO lo crea (F6a real).
-   */
-  createInventoryItem(input: {
-    productId: string;
-    variantId: string;
-    quantity: number;
-  }): Promise<WixInventoryItem>;
-}
-
-/** Error de conflicto de revisión (edición concurrente en el dashboard de Wix). */
-export class WixRevisionConflictError extends Error {
-  constructor(public readonly sku: string) {
-    super(`Conflicto de revisión en Wix para el SKU ${sku}. Re-leer y reintentar.`);
-    this.name = 'WixRevisionConflictError';
-  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -108,49 +78,6 @@ export class WixRevisionConflictError extends Error {
 class MockWixClient implements WixCatalogClient {
   readonly mode = 'mock' as const;
   private readonly store = new Map<string, WixProductEntity>();
-  /** Forzar un conflicto de revisión en el siguiente update (para probar reintentos). */
-  private failNextUpdate = false;
-
-  constructor() {
-    // Seed de ejemplo para probar el caso UPDATE por SKU
-    this.store.set('SKU-12345678', {
-      _id: randomUUID(),
-      revision: 1,
-      sku: 'SKU-12345678',
-      name: 'Producto de ejemplo (existe en mock)',
-      productOptions: [{ name: 'Talla', choices: [{ value: 'M' }, { value: 'L' }] }],
-      variantsInfo: { variants: [] },
-      seoData: { tags: [] },
-    });
-  }
-
-  simulateConflictOnNextUpdate(): void {
-    this.failNextUpdate = true;
-  }
-
-  async queryBySku(sku: string): Promise<WixProductEntity | null> {
-    return this.store.get(sku) ?? null;
-  }
-
-  async createProduct(input: { product: WixProductPayload }): Promise<WixProductEntity> {
-    const product = input.product;
-    if (!product.sku) throw new Error('Mock: falta sku en createProduct');
-    const entity: WixProductEntity = {
-      _id: randomUUID(),
-      revision: 1,
-      sku: product.sku,
-      name: product.name,
-      productOptions: product.productOptions ?? [],
-      variantsInfo: product.variantsInfo ?? { variants: [] },
-      seoData: product.seoData ?? { tags: [] },
-    };
-    this.store.set(product.sku, entity);
-    return entity;
-  }
-
-  async queryBySkuV3(sku: string): Promise<WixProductEntity | null> {
-    return this.store.get(sku) ?? null;
-  }
 
   async createProductWithInventory(
     payload: ProductWithInventoryPayload,
@@ -158,7 +85,8 @@ class MockWixClient implements WixCatalogClient {
     const sku = payload.product.physicalProperties.sku;
     if (!sku) throw new Error('Mock: falta sku en createProductWithInventory');
     if (this.store.has(sku)) {
-      // Duplicado de SKU → 409 simulado (detección de "ya existe" sin recrear)
+      // Duplicado de SKU → 409 simulado; el error PROPAGA (create-only) y el
+      // worker reintenta/falla el job visiblemente.
       const err: any = new Error(`Wix 409: producto con SKU "${sku}" ya existe.`);
       err.status = 409;
       throw err;
@@ -203,48 +131,6 @@ class MockWixClient implements WixCatalogClient {
       { _id: 'mock-brand-2', name: 'Adidas' },
       { _id: 'mock-brand-3', name: 'Puma' },
     ];
-  }
-
-  async createInventoryItem(input: {
-    productId: string;
-    variantId: string;
-    quantity: number;
-  }): Promise<WixInventoryItem> {
-    return {
-      id: randomUUID(),
-      productId: input.productId,
-      variantId: input.variantId,
-      quantity: input.quantity,
-      trackQuantity: true,
-      availabilityStatus: 'IN_STOCK',
-    };
-  }
-
-  async updateProduct(
-    id: string,
-    input: { revision: string | number; product: WixProductPayload },
-  ): Promise<WixProductEntity> {
-    const existing = [...this.store.values()].find((e) => e._id === id);
-    if (!existing) throw new Error(`Mock: producto ${id} no existe`);
-    if (this.failNextUpdate) {
-      this.failNextUpdate = false;
-      throw new WixRevisionConflictError(existing.sku ?? id);
-    }
-    if (String(existing.revision) !== String(input.revision)) {
-      throw new WixRevisionConflictError(existing.sku ?? id);
-    }
-    const updated: WixProductEntity = {
-      ...existing,
-      ...input.product,
-      _id: id,
-      revision: Number(existing.revision) + 1,
-      sku: input.product.sku ?? existing.sku,
-    };
-    // conservar estructura de variantes
-    updated.productOptions = input.product.productOptions ?? existing.productOptions ?? [];
-    updated.variantsInfo = input.product.variantsInfo ?? existing.variantsInfo ?? { variants: [] };
-    this.store.set(updated.sku!, updated);
-    return updated;
   }
 
   async getSiteProperties(): Promise<WixSiteProperties> {
@@ -296,44 +182,11 @@ class RealWixClient implements WixCatalogClient {
     this.apiKey = apiKey;
     this.siteId = siteId;
     this.client = createClient({
-      modules: { products, productsV3, categories, files },
+      modules: { productsV3, categories, files },
       auth: ApiKeyStrategy({ apiKey, siteId }),
     });
     this.client._wixApiKey = apiKey;
     this.client._wixSiteId = siteId;
-  }
-
-  async queryBySku(sku: string): Promise<WixProductEntity | null> {
-    const result = await this.client.products
-      .queryProducts()
-      .eq('sku', sku)
-      .limit(1)
-      .find();
-    const item = result?.items?.[0];
-    return item ? normalizeWixEntity(item) : null;
-  }
-
-  async createProduct(input: { product: WixProductPayload }): Promise<WixProductEntity> {
-    const result = await this.client.products.createProduct({ product: input.product });
-    return normalizeWixEntity(result?.product ?? result);
-  }
-
-  async updateProduct(
-    id: string,
-    input: { revision: string | number; product: WixProductPayload },
-  ): Promise<WixProductEntity> {
-    try {
-      const result = await this.client.products.updateProduct(id, {
-        revision: input.revision,
-        product: input.product,
-      });
-      return normalizeWixEntity(result?.product ?? result);
-    } catch (err: any) {
-      if (isRevisionConflict(err)) {
-        throw new WixRevisionConflictError(input.product.sku ?? id);
-      }
-      throw err;
-    }
   }
 
   async getSiteProperties(): Promise<WixSiteProperties> {
@@ -466,23 +319,6 @@ class RealWixClient implements WixCatalogClient {
     }
   }
 
-  // (F6) Chequeo de existencia por SKU — SOLO V3. Si Wix no acepta el filtro
-  // `eq('sku', ...)` (a confirmar en F6a), se cae a `queryProductsV3` + filtro
-  // en memoria (§8.2 del plan).
-  async queryBySkuV3(sku: string): Promise<WixProductEntity | null> {
-    try {
-      const result = await this.client.productsV3
-        .queryProducts()
-        .eq('sku', sku)
-        .limit(1)
-        .find();
-      const item = (result?.items ?? [])[0];
-      return item ? normalizeWixEntity(item) : null;
-    } catch (err: unknown) {
-      throw contextualWixError(`queryBySkuV3(sku=${sku})`, err);
-    }
-  }
-
   // (F6) Alta de producto CON inventario inicial por REST `fetch` (patrón ya
   // usado en site-properties): Authorization + wix-site-id + JSON.
   // `returnEntity: true` (docs de Wix) hace que la respuesta devuelva las
@@ -558,48 +394,6 @@ class RealWixClient implements WixCatalogClient {
       .map((b) => ({ _id: (b.id ?? b._id)!, name: b.name! }));
   }
 
-  // (F6) Crea el inventory item (cantidad real) de la variante. Verificado en
-  // F6a real: `products-with-inventory` NO crea el inventory item; hay que
-  // crearlo con este endpoint aparte para que el producto pase a IN_STOCK.
-  async createInventoryItem(input: {
-    productId: string;
-    variantId: string;
-    quantity: number;
-  }): Promise<WixInventoryItem> {
-    const url = 'https://www.wixapis.com/stores/v3/inventory-items';
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: this.apiKey,
-          'wix-site-id': this.siteId,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inventoryItem: {
-            productId: input.productId,
-            variantId: input.variantId,
-            trackQuantity: true,
-            quantity: input.quantity,
-          },
-        }),
-      });
-    } catch (err: any) {
-      throw new Error(`[wix][createInventoryItem] Red: ${err?.message ?? err}`);
-    }
-    if (!response.ok) {
-      let bodyText = '';
-      try {
-        bodyText = await response.text();
-      } catch {
-        /* sin body */
-      }
-      throw new Error(`[wix][createInventoryItem] HTTP ${response.status}: ${bodyText.slice(0, 500)}`);
-    }
-    const data = (await response.json()) as { inventoryItem?: WixInventoryItem };
-    return data.inventoryItem ?? (data as unknown as WixInventoryItem);
-  }
 }
 
 /** Deduce el `mimeType` de una imagen por la extensión de su URL (default jpeg). */
@@ -640,44 +434,9 @@ function contextualWixError(op: string, err: unknown): Error {
   return wrapped;
 }
 
-/** Normaliza la entidad que devuelve el SDK (con/sin envoltorio `product`). */
-function normalizeWixEntity(item: any): WixProductEntity {
-  return {
-    _id: item._id,
-    revision: item.revision,
-    sku: item.sku,
-    name: item.name,
-    productOptions: item.productOptions ?? [],
-    variantsInfo: item.variantsInfo ?? { variants: [] },
-    seoData: item.seoData ?? { tags: [] },
-  };
-}
-
-/** Detecta un conflicto de revisión en los errores del SDK de Wix. */
-function isRevisionConflict(err: any): boolean {
-  const msg = String(err?.message ?? '').toLowerCase();
-  return (
-    msg.includes('revision') ||
-    msg.includes('conflict') ||
-    err?.details?.applicationError?.code === 'CONCURRENT_MODIFICATION'
-  );
-}
-
 /* ---------------------------------------------------------------------------
  * Singleton según configuración
  * ------------------------------------------------------------------------- */
-
-/**
- * Crea un cliente Wix REAL independiente del singleton (sin fallback a mock).
- * Lo usa el spike F0 (No-Mock Lectura Wix). Lanza un error claro si faltan
- * credenciales.
- */
-export function createRealWixClient(): WixCatalogClient {
-  if (!env.wixApiKey || !env.wixSiteId) {
-    throw new Error('[wix] Faltan WIX_API_KEY/WIX_SITE_ID para crear el cliente REAL.');
-  }
-  return new RealWixClient(env.wixApiKey, env.wixSiteId);
-}
 
 let instance: WixCatalogClient | null = null;
 
@@ -698,14 +457,6 @@ export function getWixClient(): WixCatalogClient {
     instance = new RealWixClient(env.wixApiKey!, env.wixSiteId!);
   }
   return instance;
-}
-
-/** Útil para tests / debug: fuerza un conflicto de revisión en el mock. */
-export function simulateWixConflictForTesting(): void {
-  const client = getWixClient();
-  if (client instanceof MockWixClient) {
-    client.simulateConflictOnNextUpdate();
-  }
 }
 
 export const wixClient = getWixClient();

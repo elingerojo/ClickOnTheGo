@@ -2,7 +2,7 @@
  * Mapeo de DOS salidas JSON a partir del JSON base de Gemini (sección 5.5 del plan).
  *
  * 1. JSON-LD (schema.org) → se guarda en `products.json_ld` y se inyecta en
- *    `seoData.tags` (tipo script, application/ld+json) durante el UPSERT.
+ *    `seoData.tags` (tipo script, application/ld+json) durante el alta (create).
  * 2. Payload Wix Catalog V3 → el producto nativo de Wix.
  *
  * También contiene el esquema Zod (frontera A) usado como `responseSchema` de
@@ -167,7 +167,7 @@ export interface ProductWithInventoryBuildOptions {
  *  - `inventoryOptions.variants[0].choices` = ARRAY.
  *  - (F7) `media.itemsInfo.items[{ url, displayName, mediaType }]` se emite SI
  *    `product.imageUrls` trae URLs (el worker las reemplaza por URLs de Wix Media
- *    ANTES del upsert). Shape CONFIRMADO por el spike F7 real: `mediaItems` NO es
+ *    ANTES del alta). Shape CONFIRMADO por el spike F7 real: `mediaItems` NO es
  *    una clave válida (queda `media: {}`); la correcta es `itemsInfo.items`.
  */
 export function buildProductWithInventoryPayload(
