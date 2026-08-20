@@ -11,15 +11,37 @@ export async function loadJob(id: string): Promise<Job | null> {
   return rows.length ? rowToJobWithProduct(rows[0]) : null;
 }
 
+/** Ventana de "recientes": jobs actualizados en los últimos 5 días (sin tope). */
+const RECENT_WINDOW = `interval '5 days'`;
+/** Tope de filas del dashboard (solo aplica al relleno con jobs antiguos). */
+const MAX_VISIBLE_JOBS = 20;
+
 export async function listJobs(state?: JobState | 'all'): Promise<Job[]> {
-  if (state && state !== 'all') {
-    const { rows } = await query(
-      `${JOB_PRODUCT_SELECT} WHERE j.state = $1 ORDER BY j.created_at DESC`,
-      [state],
-    );
-    return rows.map(rowToJobWithProduct);
-  }
-  const { rows } = await query(`${JOB_PRODUCT_SELECT} ORDER BY j.created_at DESC`);
+  // Regla del dashboard: se traen TODOS los jobs con updated_at < 5 días
+  // (aunque sean más de 20) y se rellena hasta 20 con los más recientes de los
+  // antiguos (>= 5 días). Así la lista no crece infinitamente en el payload.
+  const stateWhere = state && state !== 'all' ? `j.state = $1 AND ` : '';
+  const params: unknown[] = state && state !== 'all' ? [state] : [];
+  const recentWhere = `${stateWhere}j.updated_at > now() - ${RECENT_WINDOW}`;
+  const fillWhere = `${stateWhere}j.updated_at <= now() - ${RECENT_WINDOW}`;
+
+  const { rows } = await query(
+    `WITH recent AS (
+       ${JOB_PRODUCT_SELECT}
+       WHERE ${recentWhere}
+     ),
+     fill AS (
+       ${JOB_PRODUCT_SELECT}
+       WHERE ${fillWhere}
+       ORDER BY j.created_at DESC
+       LIMIT (SELECT GREATEST(0, ${MAX_VISIBLE_JOBS} - (SELECT count(*)::int FROM recent)))
+     )
+     SELECT * FROM recent
+     UNION ALL
+     SELECT * FROM fill
+     ORDER BY job_created_at DESC`,
+    params,
+  );
   return rows.map(rowToJobWithProduct);
 }
 

@@ -13,6 +13,27 @@ const STATE_STYLES: Record<string, string> = {
   error: 'bg-red-100 text-red-800',
 };
 
+/** Ventana de "recientes": jobs actualizados en los últimos 5 días (sin tope). */
+const RECENT_MS = 5 * 24 * 60 * 60 * 1000;
+/** Tope de filas del dashboard (solo aplica al relleno con jobs antiguos). */
+const MAX_VISIBLE_JOBS = 20;
+
+/**
+ * Limita la lista de jobs para el dashboard sin cortar lo reciente:
+ * - Todos los jobs con `updatedAt` de hace menos de 5 días se muestran SIEMPRE
+ *   (sin límite, aunque sean más de 20).
+ * - Si con esos no se llega a 20, se rellenan con los jobs antiguos más
+ *   recientes (updatedAt >= 5 días) hasta completar 20.
+ * La lista de entrada ya viene ordenada de más reciente a más antiguo.
+ */
+function limitJobs(jobs: Job[]): Job[] {
+  const cutoff = Date.now() - RECENT_MS;
+  const recent = jobs.filter((j) => Date.parse(j.updatedAt) >= cutoff);
+  if (recent.length >= MAX_VISIBLE_JOBS) return recent;
+  const older = jobs.filter((j) => Date.parse(j.updatedAt) < cutoff);
+  return [...recent, ...older.slice(0, MAX_VISIBLE_JOBS - recent.length)];
+}
+
 @Component({
   selector: 'app-jobs-dashboard',
   standalone: true,
@@ -44,7 +65,7 @@ const STATE_STYLES: Record<string, string> = {
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              <tr *ngFor="let job of jobs()">
+              <tr *ngFor="let job of visibleJobs()">
                 <td class="px-5 py-3 font-medium">{{ job.product?.name ?? '—' }}</td>
                 <td class="px-5 py-3 text-slate-500">{{ job.product?.sku ?? '—' }}</td>
                 <td class="px-5 py-3">
@@ -64,7 +85,7 @@ const STATE_STYLES: Record<string, string> = {
                   >Reintentar</button>
                 </td>
               </tr>
-              <tr *ngIf="jobs().length === 0">
+              <tr *ngIf="visibleJobs().length === 0">
                 <td colspan="6" class="px-5 py-8 text-center text-slate-400">Sin jobs todavía</td>
               </tr>
             </tbody>
@@ -98,6 +119,11 @@ const STATE_STYLES: Record<string, string> = {
 })
 export class JobsDashboardComponent implements OnInit {
   jobs = signal<Job[]>([]);
+  /**
+   * Vista limitada del listado para que no crezca infinitamente: todos los
+   * jobs con updatedAt < 5 días (sin tope) + relleno con antiguos hasta 20.
+   */
+  visibleJobs = computed(() => limitJobs(this.jobs()));
   devices = signal<Device[]>([]);
   /**
    * Solo los OTROS dispositivos: se oculta el dispositivo actual (no puede
