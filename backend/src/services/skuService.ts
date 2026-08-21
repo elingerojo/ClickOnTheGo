@@ -13,7 +13,8 @@
  * `sku` de la variante (VariantWithInventory) con `minLength 1 / maxLength 40`.
  *
  * (B2) También expone `sanitizeGtin`: normaliza y valida un código de barras
- * GTIN (UPC-A=12, EAN-13=13, EAN-8=8, GTIN-14=14) con checksum Luhn mod-10.
+ * GTIN (UPC-A=12, EAN-13=13, EAN-8=8, GTIN-14=14) con el checksum GS1 de
+ * pesos alternos ×1/×3 (mod-10).
  * Gemini puede alucinar un GTIN; aquí se descarta cualquier valor inválido y
  * el barcode en Wix se trata como OPCIONAL (nunca se fuerza un dato falso).
  *
@@ -77,41 +78,39 @@ export function buildSku(
 }
 
 /**
- * Validación Luhn mod-10 sobre la cadena completa de dígitos (incluye el dígito
- * verificador, que es el último). Es el estándar de los GTIN/UPC/EAN.
+ * Checksum GS1 de los GTIN/UPC/EAN (mod-10 con pesos alternos): se recorre de
+ * derecha a izquierda asignando peso 1 al dígito verificador (el último) y
+ * alternando ×1/×3 hacia la izquierda; la suma debe ser múltiplo de 10.
+ * NOTA: NO es el "Luhn" de tarjetas/IMEI (doblar con reducción de dígitos);
+ * ese algoritmo rechaza GTIN válidos (p. ej. 7501005129947 o 9780306406157).
  */
-function luhnCheck(digits: string): boolean {
+function gtinChecksum(digits: string): boolean {
   let sum = 0;
-  let double = false;
+  let weight = 1; // el dígito verificador (último) tiene peso 1
   for (let i = digits.length - 1; i >= 0; i--) {
     const ch = digits.charCodeAt(i);
     if (ch < 48 || ch > 57) return false;
-    let d = ch - 48;
-    if (double) {
-      d *= 2;
-      if (d > 9) d -= 9;
-    }
-    sum += d;
-    double = !double;
+    sum += (ch - 48) * weight;
+    weight = weight === 1 ? 3 : 1;
   }
   return sum % 10 === 0;
 }
 
 /**
  * Normaliza y valida un GTIN (código de barras). Devuelve los dígitos si pasan
- * longitud + checksum Luhn; `null` si está vacío o no es un GTIN válido.
+ * longitud + checksum GS1; `null` si está vacío o no es un GTIN válido.
  * OPCIONAL por diseño: si Gemini alucina un valor, aquí se descarta.
  */
 export function sanitizeGtin(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, '');
   if (!GTIN_LENGTHS.has(digits.length)) return null;
-  return luhnCheck(digits) ? digits : null;
+  return gtinChecksum(digits) ? digits : null;
 }
 
 /**
  * Resuelve el código de barras ÚNICO del producto con prioridad GTIN > UPC > ASIN.
- * - GTIN/UPC: dígitos con longitud válida (8/12/13/14) y checksum Luhn → dígitos
+ * - GTIN/UPC: dígitos con longitud válida (8/12/13/14) y checksum GS1 → dígitos
  *   (UPC-A es un GTIN-12, así que cubre tanto GTIN como UPC).
  * - ASIN: último caso, solo si no hay GTIN válido (10 alfanuméricos que empiezan
  *   por 'B', formato de Amazon).
@@ -123,7 +122,7 @@ export function sanitizeGtin(raw: string | null | undefined): string | null {
 export function sanitizeBarcode(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, '');
-  if (GTIN_LENGTHS.has(digits.length) && luhnCheck(digits)) return digits;
+  if (GTIN_LENGTHS.has(digits.length) && gtinChecksum(digits)) return digits;
   const trimmed = raw.trim().toUpperCase();
   if (/^B[A-Z0-9]{9}$/.test(trimmed)) return trimmed;
   return null;
